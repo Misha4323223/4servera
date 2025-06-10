@@ -128,11 +128,12 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
           if (result.success) {
             const svgResponse = `✅ Векторизация завершена через сервер 5006!
 
-📄 Формат: SVG (5 цветов максимум)
+📄 Формат: SVG (5 цветов максимум)  
 🎨 Качество: Упрощенная обработка
 📁 Файл: ${result.result.filename}
 
-🔗 Векторное изображение готово для скачивания`;
+🔗 [Просмотреть изображение](/output/vectorizer/${result.result.filename})
+📥 [Скачать SVG файл](/output/vectorizer/${result.result.filename}?download=true)`;
 
             return {
               success: true,

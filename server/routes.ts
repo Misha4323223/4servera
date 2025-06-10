@@ -137,9 +137,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Создаем маршрут для доступа к сгенерированным изображениям
+  // Создаем маршрут для доступа к сгенерированным изображениям с поддержкой скачивания
   app.use('/output', (req, res, next) => {
     const outputPath = path.join(__dirname, '..', 'output');
+    const filePath = path.join(outputPath, req.path);
+    
+    // Проверяем параметр download для принудительного скачивания
+    if (req.query.download === 'true') {
+      const fileName = path.basename(req.path);
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.setHeader('Content-Type', 'application/octet-stream');
+    }
+    
     res.sendFile(req.path, { root: outputPath });
   });
   
@@ -223,18 +232,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.sendFile('public/image-generator.html', { root: '.' });
   });
   
-  // Статические файлы для просмотра и скачивания обработанных изображений
-  app.use('/output', express.static('output', {
-    setHeaders: (res, path) => {
-      // Для изображений разрешаем просмотр в браузере
-      if (path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.jpeg')) {
-        res.set('Content-Type', 'image/' + path.split('.').pop());
-      } else {
-        // Для файлов вышивки принудительное скачивание
-        res.set('Content-Disposition', 'attachment');
-      }
-    }
-  }));
+  // Убираем дублирующий маршрут - используем только один выше с поддержкой параметра download
   
   // BOOOMERANGS AI генератор изображений
   app.get('/ai-images', (req, res) => {
