@@ -148,10 +148,8 @@ async function startVectorizerServer() {
         detailedLog(`   Event loop empty, process about to exit`, 'EXIT');
         detailedLog(`   Stack trace at beforeExit: ${new Error().stack}`, 'EXIT');
         
-        // Попытка спасти процесс
-        setTimeout(() => {
-          detailedLog('🆘 RESCUE ATTEMPT: Adding timeout to prevent exit', 'EXIT');
-        }, 100);
+        // Логируем событие без попыток "спасения"
+        detailedLog('🚪 Process entering beforeExit state', 'EXIT');
       }
       
       if (eventName === 'warning') {
