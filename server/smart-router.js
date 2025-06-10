@@ -310,11 +310,11 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
             }
             responseText += `🎨 **Оптимизировано для печати**\n\n`;
             
-            // Информация о качестве
-            responseText += `📊 **Параметры обработки:**\n`;
-            responseText += `• Качество: ${quality.toUpperCase()}\n`;
-            responseText += `• Оптимизация: ${optimizeFor}\n`;
-            responseText += `• Обнаруженный тип: ${result.main.detectedType}\n\n`;
+            // Информация о файле
+            responseText += `📊 **Детали:**\n`;
+            responseText += `• Режим: Шелкография\n`;
+            responseText += `• Цвета: Максимум 5\n`;
+            responseText += `• Лимит размера: 20МБ\n\n`;
             
             // Создаем файлы и ссылки для доступа
             let downloadLinks = '';
