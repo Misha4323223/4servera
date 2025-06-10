@@ -1022,8 +1022,16 @@ async function extractAdobeColors(imageBuffer, maxColors) {
       });
     }
     
+    console.log(`📊 Извлечено ${pixels.length} пикселей из ${data.length / info.channels} (каналов: ${info.channels})`);
+    
+    if (pixels.length === 0) {
+      console.log('❌ Нет пикселей для анализа');
+      return [];
+    }
+    
     // K-means кластеризация цветов
     const clusters = performKMeans(pixels, maxColors);
+    console.log(`🔬 K-means результат: ${clusters ? clusters.length : 0} кластеров`);
     
     // Конвертируем в формат Adobe
     const adobeColors = clusters.map(cluster => ({
@@ -1047,7 +1055,12 @@ async function extractAdobeColors(imageBuffer, maxColors) {
  * Простая K-means кластеризация для цветов
  */
 function performKMeans(pixels, k) {
-  if (pixels.length === 0) return [];
+  if (pixels.length === 0) {
+    console.log('❌ performKMeans: Нет пикселей');
+    return [];
+  }
+  
+  console.log(`🔬 performKMeans: Кластеризация ${pixels.length} пикселей на ${k} кластеров`);
   
   // Инициализация центроидов
   let centroids = [];
@@ -1055,6 +1068,8 @@ function performKMeans(pixels, k) {
     const randomPixel = pixels[Math.floor(Math.random() * pixels.length)];
     centroids.push({ ...randomPixel, weight: 0 });
   }
+  
+  console.log(`🎯 Инициализировано ${centroids.length} центроидов`);
   
   // Итерации K-means
   for (let iter = 0; iter < 10; iter++) {
