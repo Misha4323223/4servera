@@ -138,33 +138,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Создаем маршрут для доступа к сгенерированным изображениям с поддержкой скачивания
-  app.get('/output/*', (req, res) => {
+  app.use('/output', (req, res, next) => {
     const outputPath = path.join(__dirname, '..', 'output');
-    const filePath = req.params[0]; // Получаем путь после /output/
+    const filePath = path.join(outputPath, req.path);
     
     // Проверяем параметр download для принудительного скачивания
     if (req.query.download === 'true') {
-      const fileName = path.basename(filePath);
+      const fileName = path.basename(req.path);
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       res.setHeader('Content-Type', 'application/octet-stream');
     }
     
-    res.sendFile(filePath, { root: outputPath }, (err) => {
-      if (err) {
-        console.error('Ошибка отправки файла:', err);
-        res.status(404).send('Файл не найден');
-      }
-    });
+    res.sendFile(req.path, { root: outputPath });
   });
   
   // Тестовая страница
   app.get('/test', (req, res) => {
     res.sendFile('test-page.html', { root: '.' });
-  });
-  
-  // Тестовая страница команды "нужен вектор"
-  app.get('/test-vector', (req, res) => {
-    res.sendFile('test-vector-command.html', { root: '.' });
   });
   
   // Демо-страница генератора изображений

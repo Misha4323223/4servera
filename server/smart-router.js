@@ -102,23 +102,8 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
     const isDirectVectorizerRequest = directVectorizerKeywords.some(keyword => queryLowerForSvg.includes(keyword));
     
     // Обработка прямого запроса к векторизатору на порту 5006
-    if (isDirectVectorizerRequest) {
+    if (isDirectVectorizerRequest && options.imageUrl) {
       SmartLogger.route(`🎯 ПРЯМОЙ ЗАПРОС К ВЕКТОРИЗАТОРУ 5006`);
-      
-      // Проверяем наличие изображения
-      if (!options.imageUrl) {
-        return {
-          success: false,
-          response: `❌ Для команды "нужен вектор" необходимо сначала загрузить изображение!
-
-📋 Инструкция:
-1. Загрузите изображение через интерфейс
-2. Напишите "нужен вектор"
-3. Получите векторную версию в формате SVG`,
-          provider: 'Vectorizer-5006',
-          category: 'vectorization_error'
-        };
-      }
       
       try {
         const fetch = require('node-fetch');
