@@ -276,16 +276,20 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     }
   };
   
-  // Упрощенные обработчики завершения
-  process.on('SIGTERM', () => {
-    console.log('📥 Получен SIGTERM, завершаем работу...');
-    cleanupAndExit(0);
-  });
+  // Устанавливаем обработчики сигналов только один раз
+  if (!process.listenerCount('SIGTERM')) {
+    process.on('SIGTERM', () => {
+      console.log('📥 Получен SIGTERM, завершаем работу...');
+      cleanupAndExit(0);
+    });
+  }
   
-  process.on('SIGINT', () => {
-    console.log('📥 Получен SIGINT, завершаем работу...');
-    cleanupAndExit(0);
-  });
+  if (!process.listenerCount('SIGINT')) {
+    process.on('SIGINT', () => {
+      console.log('📥 Получен SIGINT, завершаем работу...');
+      cleanupAndExit(0);
+    });
+  }
 
   // Упрощенные обработчики серверных событий
   server.on('error', (error) => {
