@@ -90,7 +90,7 @@ async function silkscreenVectorize(imageBuffer, options = {}) {
     const colorQuantizedBuffer = await quantizeColorsAI(processedBuffer, settings.maxColors);
     
     // Векторизация с оптимальными параметрами для печати
-    const svgContent = await createColoredSVG(colorQuantizedBuffer, settings);
+    const svgContent = await createSilkscreenSVG(colorQuantizedBuffer, settings);
     
     // Проверка размера файла (ограничение 20МБ)
     const svgSize = Buffer.byteLength(svgContent, 'utf8');
@@ -698,11 +698,11 @@ async function advancedVectorize(imageBuffer, options = {}) {
       (options.colors && options.colors !== 'mono');
     
     if (needsColorVectorization) {
-      console.log(`🎨 ВЫБРАН: Цветной алгоритм createColoredSVG`);
-      return await createColoredSVG(imageBuffer, options);
-    } else {
-      console.log(`⚫ ВЫБРАН: Монохромный алгоритм silkscreenVectorize`);
+      console.log(`🎨 ВЫБРАН: Цветной алгоритм createSilkscreenSVG`);
       return await silkscreenVectorize(imageBuffer, options);
+    } else {
+      console.log(`⚫ ВЫБРАН: Монохромный алгоритм createRealSVG`);
+      return await createRealSVG(imageBuffer, options);
     }
     
   } catch (error) {
