@@ -36,17 +36,38 @@ async function startVectorizerServer() {
   console.log(`  ✓ Порт: ${PORT}`);
   console.log('  ✓ __dirname:',  __dirname);
 
-  // Перехват всех ошибок процесса
+  // Детальное логирование всех событий процесса
+  console.log('📝 Настройка обработчиков событий процесса...');
+  
   process.on('uncaughtException', (error) => {
-    console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - uncaughtException:', error);
-    console.error('Stack trace:', error.stack);
+    console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - uncaughtException:', error.message);
+    console.error('   Error type:', error.constructor.name);
+    console.error('   Stack trace:', error.stack);
+    console.error('   Time:', new Date().toISOString());
     process.exit(1);
   });
 
   process.on('unhandledRejection', (reason, promise) => {
     console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - unhandledRejection:', reason);
-    console.error('Promise:', promise);
+    console.error('   Promise:', promise);
+    console.error('   Time:', new Date().toISOString());
+    if (reason instanceof Error) {
+      console.error('   Stack:', reason.stack);
+    }
     process.exit(1);
+  });
+
+  process.on('warning', (warning) => {
+    console.warn('⚠️ Process Warning:', warning.name, warning.message);
+    console.warn('   Stack:', warning.stack);
+  });
+
+  process.on('exit', (code) => {
+    console.log(`🚪 Process exiting with code: ${code} at ${new Date().toISOString()}`);
+  });
+
+  process.on('beforeExit', (code) => {
+    console.log(`🚪 Before exit with code: ${code} at ${new Date().toISOString()}`);
   });
 
 // Настройка CORS для кросс-доменных запросов
@@ -131,12 +152,75 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Запуск сервера
-app.listen(PORT, '0.0.0.0', () => {
+// Запуск сервера с детальным логированием
+console.log(`🚀 Попытка запуска сервера на порту ${PORT}...`);
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎨 Vectorizer Server запущен на порту ${PORT}`);
   console.log(`📍 API доступен по адресу: http://localhost:${PORT}/api/vectorizer`);
   console.log(`🏥 Health check: http://localhost:${PORT}/health`);
   console.log(`📁 Output files: http://localhost:${PORT}/output`);
+  console.log(`⏰ Время запуска: ${new Date().toISOString()}`);
+  
+  // Периодическая проверка состояния (каждые 3 секунды для детального мониторинга)
+  const healthInterval = setInterval(() => {
+    try {
+      const memUsage = process.memoryUsage();
+      const uptime = process.uptime();
+      console.log(`💓 Heartbeat ${new Date().toISOString()} - Memory: ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB, Uptime: ${Math.round(uptime)}s`);
+      
+      // Проверяем состояние сервера
+      if (!server.listening) {
+        console.error('❌ Сервер больше не слушает на порту!');
+        clearInterval(healthInterval);
+      }
+    } catch (error) {
+      console.error('❌ Ошибка в heartbeat:', error.message);
+      console.error('   Stack:', error.stack);
+    }
+  }, 3000);
+  
+  // Сохраняем интервал для очистки при завершении
+  server.healthInterval = healthInterval;
+});
+
+// Детальное логирование событий сервера
+server.on('error', (error) => {
+  console.error('❌ КРИТИЧЕСКАЯ ОШИБКА СЕРВЕРА:', error.message);
+  console.error('   Error code:', error.code);
+  console.error('   Error type:', error.constructor.name);
+  console.error('   Time:', new Date().toISOString());
+  console.error('   Stack:', error.stack);
+  
+  if (error.code === 'EADDRINUSE') {
+    console.error(`   Порт ${PORT} уже используется другим процессом`);
+  } else if (error.code === 'EACCES') {
+    console.error(`   Нет доступа к порту ${PORT}`);
+  }
+});
+
+server.on('close', () => {
+  console.log(`🛑 Сервер закрыт в: ${new Date().toISOString()}`);
+  if (server.healthInterval) {
+    clearInterval(server.healthInterval);
+    console.log('🧹 Health interval очищен');
+  }
+});
+
+server.on('connection', (socket) => {
+  console.log(`🔗 Новое соединение: ${new Date().toISOString()}`);
+  
+  socket.on('error', (error) => {
+    console.error('❌ Ошибка сокета:', error.message);
+    console.error('   Time:', new Date().toISOString());
+  });
+  
+  socket.on('close', (hadError) => {
+    console.log(`🔌 Сокет закрыт: ${new Date().toISOString()}, had error: ${hadError}`);
+  });
+  
+  socket.on('timeout', () => {
+    console.warn('⏰ Socket timeout:', new Date().toISOString());
+  });
 });
 
   // Graceful shutdown
