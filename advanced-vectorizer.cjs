@@ -2284,7 +2284,7 @@ module.exports = {
   multiFormatVectorize,
   optimizeForUsage,
   professionalVectorize,
-  SILKSCREEN_PRESET,
+  ADOBE_SILKSCREEN_PRESET,
   OUTPUT_FORMATS,
   CONTENT_TYPES
 };
