@@ -226,12 +226,66 @@ server.on('connection', (socket) => {
   // Graceful shutdown
   process.on('SIGTERM', () => {
     console.log('🛑 Vectorizer Server получил SIGTERM, завершение...');
-    process.exit(0);
+    if (server.healthInterval) {
+      clearInterval(server.healthInterval);
+    }
+    server.close(() => {
+      console.log('✅ Сервер корректно закрыт');
+      process.exit(0);
+    });
   });
 
   process.on('SIGINT', () => {
     console.log('🛑 Vectorizer Server получил SIGINT, завершение...');
-    process.exit(0);
+    if (server.healthInterval) {
+      clearInterval(server.healthInterval);
+    }
+    server.close(() => {
+      console.log('✅ Сервер корректно закрыт');
+      process.exit(0);
+    });
+  });
+
+  // Предотвращаем автоматическое завершение процесса
+  console.log('🔒 Процесс зафиксирован для работы сервера');
+  
+  // Keep-alive механизм для предотвращения завершения
+  const keepAlive = setInterval(() => {
+    // Пустая функция для поддержания event loop
+  }, 30000);
+  
+  // Добавляем обработчик для отладки неожиданного завершения
+  process.on('exit', (code) => {
+    console.log(`🚪 Process exiting with code: ${code} at ${new Date().toISOString()}`);
+    console.log('   Last heartbeat was running, unexpected exit detected');
+    clearInterval(keepAlive);
+    if (server.healthInterval) {
+      clearInterval(server.healthInterval);
+    }
+  });
+
+  process.on('beforeExit', (code) => {
+    console.log(`🚪 Before exit with code: ${code} at ${new Date().toISOString()}`);
+    console.log('   Event loop became empty, this should not happen with server running');
+    // Принудительно поддерживаем процесс живым
+    setTimeout(() => {
+      console.log('⚡ Keep-alive timeout executed');
+    }, 1000);
+  });
+  
+  // Возвращаем объект для предотвращения завершения async функции
+  return new Promise((resolve, reject) => {
+    server.on('close', () => {
+      console.log('🛑 Server closed, resolving promise');
+      clearInterval(keepAlive);
+      resolve();
+    });
+    
+    server.on('error', (error) => {
+      console.error('❌ Server error, rejecting promise:', error);
+      clearInterval(keepAlive);
+      reject(error);
+    });
   });
 }
 
