@@ -11,11 +11,43 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Импортируем готовые маршруты векторизатора
-import vectorizerRoutes from './advanced-vectorizer-routes.js';
+// Асинхронная функция запуска сервера
+async function startVectorizerServer() {
+  // Импортируем готовые маршруты векторизатора с обработкой ошибок
+  let vectorizerRoutes;
+  try {
+    console.log('🔍 Загрузка модуля vectorizer routes...');
+    vectorizerRoutes = await import('./advanced-vectorizer-routes.js');
+    vectorizerRoutes = vectorizerRoutes.default;
+    console.log('  ✓ Vectorizer routes загружены успешно');
+  } catch (error) {
+    console.error('❌ ОШИБКА загрузки vectorizer routes:', error);
+    console.error('Error stack:', error.stack);
+    process.exit(1);
+  }
 
-const app = express();
-const PORT = process.env.VECTORIZER_PORT || 5006;
+  const app = express();
+  const PORT = process.env.VECTORIZER_PORT || 5006;
+
+// Детальное логирование для диагностики
+console.log('🔍 Диагностика запуска векторизатора:');
+console.log('  ✓ Express импортирован');
+console.log('  ✓ CORS импортирован');
+console.log(`  ✓ Порт: ${PORT}`);
+console.log('  ✓ __dirname:',  __dirname);
+
+// Перехват всех ошибок процесса
+process.on('uncaughtException', (error) => {
+  console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - uncaughtException:', error);
+  console.error('Stack trace:', error.stack);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - unhandledRejection:', reason);
+  console.error('Promise:', promise);
+  process.exit(1);
+});
 
 // Настройка CORS для кросс-доменных запросов
 app.use(cors({
