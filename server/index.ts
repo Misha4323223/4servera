@@ -6,6 +6,11 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import cors from 'cors';
 
+// Инициализируем векторизатор-менеджер
+const { createRequire } = require('module');
+const require = createRequire(import.meta.url);
+const vectorizerManager = require('./vectorizer-manager');
+
 const app = express();
 app.use(cors()); // Разрешаем CORS для всех маршрутов
 app.use(express.json());

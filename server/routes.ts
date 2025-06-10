@@ -276,10 +276,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.sendFile('logs-viewer.html', { root: '.' });
   });
   
-  // Веб-интерфейс векторизатора изображений
-  app.get('/vectorizer', (req, res) => {
-    res.sendFile('public/vectorizer-interface.html', { root: '.' });
-  });
+
   
   // Перенаправляем запрос умного чата на HTML-страницу
   app.get('/smart-chat', (req, res) => {
