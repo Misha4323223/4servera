@@ -174,7 +174,13 @@ async function silkscreenVectorize(imageBuffer, options = {}) {
     console.log(`🎯 Adobe автоматический порог: ${optimalThreshold}`);
     
     // Limited Color режим - точная цветовая векторизация
+    console.log(`🎨 ПРИНУДИТЕЛЬНЫЙ ВЫЗОВ: createAdobeLimitedColorSVG`);
+    console.log(`📋 Settings для Adobe:`, JSON.stringify(settings));
+    
     const svgContent = await createAdobeLimitedColorSVG(processedBuffer, settings);
+    
+    console.log(`📄 Результат SVG длина: ${svgContent ? svgContent.length : 0}`);
+    console.log(`🔍 SVG начинается с:`, svgContent ? svgContent.substring(0, 200) : 'ПУСТО');
     
     // Проверка размера файла (ограничение 20МБ)
     const svgSize = Buffer.byteLength(svgContent, 'utf8');
