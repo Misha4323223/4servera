@@ -129,20 +129,46 @@ function logSystemState(reason = 'periodic') {
   detailedLog(`SYSTEM STATE: PID=${process.pid}, Handles=${handles.length}, Memory=${Math.round(mem.heapUsed/1024/1024)}MB`, 'SYSTEM');
 }
 
+// Ленивая загрузка векторизатора для предотвращения блокировки Event Loop
+function createLazyVectorizerRouter() {
+  const router = express.Router();
+  let realRoutes = null;
+  
+  // Middleware для ленивой загрузки
+  router.use(async (req, res, next) => {
+    if (!realRoutes) {
+      try {
+        detailedLog('🔄 Первый запрос - загружаем vectorizer routes...');
+        const module = await import('./advanced-vectorizer-routes.js');
+        realRoutes = module.default;
+        detailedLog('  ✅ Vectorizer routes загружены по требованию');
+      } catch (error) {
+        logError('❌ ОШИБКА ленивой загрузки vectorizer routes', error);
+        return res.status(500).json({ error: 'Vectorizer temporarily unavailable' });
+      }
+    }
+    
+    // Перенаправляем на реальный роутер
+    realRoutes(req, res, next);
+  });
+  
+  return router;
+}
+
 detailedLog('🚀 VECTORIZER SERVER STARTUP INITIATED');
 detailedLog('📁 Log file created: ' + logFile);
 
-// Асинхронная функция запуска сервера
+// Асинхронная функция запуска сервера с ленивой загрузкой
 async function startVectorizerServer() {
-  // Импортируем готовые маршруты векторизатора с обработкой ошибок
+  // Откладываем загрузку тяжелых модулей до первого запроса
   let vectorizerRoutes;
   try {
-    detailedLog('🔍 Загрузка модуля vectorizer routes...');
-    vectorizerRoutes = await import('./advanced-vectorizer-routes.js');
-    vectorizerRoutes = vectorizerRoutes.default;
-    detailedLog('  ✓ Vectorizer routes загружены успешно');
+    detailedLog('🔍 Подготовка ленивой загрузки vectorizer routes...');
+    // Создаем lightweight роутер который загружает модули по требованию
+    vectorizerRoutes = createLazyVectorizerRouter();
+    detailedLog('  ✓ Lazy vectorizer router создан');
   } catch (error) {
-    logError('❌ ОШИБКА загрузки vectorizer routes', error);
+    logError('❌ ОШИБКА создания lazy router', error);
     process.exit(1);
   }
 
@@ -183,14 +209,14 @@ async function startVectorizerServer() {
     process.exit(1);
   }
 
-  // Настройка middleware с детальным логированием
+  // Настройка middleware с оптимизированными лимитами
   detailedLog('🔧 Настройка middleware для парсинга данных...');
   try {
-    app.use(express.json({ limit: '50mb' }));
-    detailedLog('  ✅ JSON middleware настроен (лимит: 50mb)');
+    app.use(express.json({ limit: '30mb' }));
+    detailedLog('  ✅ JSON middleware настроен (лимит: 30mb)');
     
-    app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-    detailedLog('  ✅ URL-encoded middleware настроен (лимит: 50mb)');
+    app.use(express.urlencoded({ extended: true, limit: '30mb' }));
+    detailedLog('  ✅ URL-encoded middleware настроен (лимит: 30mb)');
   } catch (error) {
     logError('❌ ОШИБКА настройки middleware', error);
     process.exit(1);
@@ -332,53 +358,19 @@ app.use((err, req, res, next) => {
     process.exit(1);
   }
 
-  // Периодическое логирование состояния для отслеживания стабильности
-  setInterval(() => {
-    logSystemState('health_check');
-  }, 15000); // Каждые 15 секунд
+  // Убираем периодическое логирование - оно блокирует Event Loop
   
-  // Упрощенная проверка состояния без избыточного логирования
-  const healthInterval = setInterval(() => {
-    try {
-      const memUsage = process.memoryUsage();
-      const handles = process._getActiveHandles();
-      
-      console.log(`💓 Health: ${Math.round(process.uptime())}s, ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB, ${handles.length} handles`);
-      
-      // Критическая проверка состояния сервера
-      if (!server.listening) {
-        console.error('❌ CRITICAL: Server no longer listening!');
-        clearInterval(healthInterval);
-        return;
-      }
-      
-      // Проверка утечек памяти
-      if (memUsage.heapUsed > 100 * 1024 * 1024) {
-        console.warn(`⚠️ HIGH MEMORY: ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`);
-      }
-      
-    } catch (error) {
-      console.error('❌ Heartbeat error:', error.message);
-    }
-  }, 10000);
-  
-  // Сохраняем интервал для очистки при завершении
-  server.healthInterval = healthInterval;
+  // Убираем heartbeat интервал - основная причина блокировки Event Loop
   
   // HTTP сервер сам поддерживает процесс активным
   
   
-  // Обновляем обработчики завершения для очистки интервалов
+  // Обработчики завершения без интервалов
   const cleanupAndExit = (code = 0) => {
-    console.log(`🧹 Очистка ресурсов перед завершением...`);
-    if (server.healthInterval) {
-      clearInterval(server.healthInterval);
-      console.log('  ✓ Health interval очищен');
-    }
-
+    detailedLog(`🧹 Graceful shutdown...`);
     if (server.listening) {
       server.close(() => {
-        console.log('  ✓ HTTP сервер закрыт');
+        detailedLog('  ✓ HTTP сервер закрыт');
         process.exit(code);
       });
     } else {
@@ -411,11 +403,7 @@ app.use((err, req, res, next) => {
   });
 
   server.on('close', () => {
-    console.log('🛑 Сервер закрыт');
-    if (server.healthInterval) {
-      clearInterval(server.healthInterval);
-    }
-
+    detailedLog('🛑 Сервер закрыт');
   });
 
   detailedLog('✅ Векторизатор полностью инициализирован и готов к работе');
