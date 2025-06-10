@@ -39,27 +39,41 @@ async function startVectorizerServer() {
   // Детальное логирование всех событий процесса
   console.log('📝 Настройка обработчиков событий процесса...');
   
-  process.on('uncaughtException', (error) => {
-    console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - uncaughtException:', error.message);
-    console.error('   Error type:', error.constructor.name);
-    console.error('   Stack trace:', error.stack);
-    console.error('   Time:', new Date().toISOString());
-    process.exit(1);
-  });
-
-  process.on('unhandledRejection', (reason, promise) => {
-    console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - unhandledRejection:', reason);
-    console.error('   Promise:', promise);
-    console.error('   Time:', new Date().toISOString());
-    if (reason instanceof Error) {
-      console.error('   Stack:', reason.stack);
-    }
-    process.exit(1);
-  });
-
-  process.on('warning', (warning) => {
-    console.warn('⚠️ Process Warning:', warning.name, warning.message);
-    console.warn('   Stack:', warning.stack);
+  // Логируем все возможные события процесса
+  const processEvents = [
+    'uncaughtException', 'unhandledRejection', 'warning', 'exit', 'beforeExit',
+    'SIGTERM', 'SIGINT', 'SIGHUP', 'SIGBREAK', 'message', 'disconnect'
+  ];
+  
+  processEvents.forEach(eventName => {
+    process.on(eventName, (...args) => {
+      console.log(`🔔 Process Event: ${eventName} at ${new Date().toISOString()}`);
+      console.log('   Args:', args);
+      
+      if (eventName === 'uncaughtException') {
+        const error = args[0];
+        console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - uncaughtException:', error.message);
+        console.error('   Error type:', error.constructor.name);
+        console.error('   Stack trace:', error.stack);
+        process.exit(1);
+      }
+      
+      if (eventName === 'unhandledRejection') {
+        const [reason, promise] = args;
+        console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - unhandledRejection:', reason);
+        console.error('   Promise:', promise);
+        if (reason instanceof Error) {
+          console.error('   Stack:', reason.stack);
+        }
+        process.exit(1);
+      }
+      
+      if (eventName === 'warning') {
+        const warning = args[0];
+        console.warn('⚠️ Process Warning:', warning.name, warning.message);
+        console.warn('   Stack:', warning.stack);
+      }
+    });
   });
 
   process.on('exit', (code) => {
@@ -77,6 +91,22 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
+
+// Детальное логирование всех HTTP запросов
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString();
+  console.log(`🌐 HTTP ${req.method} ${req.url} from ${req.ip} at ${timestamp}`);
+  console.log(`   User-Agent: ${req.get('User-Agent')}`);
+  
+  // Логируем ответ
+  const originalSend = res.send;
+  res.send = function(data) {
+    console.log(`📤 Response ${res.statusCode} for ${req.method} ${req.url} at ${new Date().toISOString()}`);
+    return originalSend.call(this, data);
+  };
+  
+  next();
+});
 
 // Middleware для парсинга JSON и URL-encoded данных
 app.use(express.json({ limit: '50mb' }));
@@ -161,23 +191,39 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`📁 Output files: http://localhost:${PORT}/output`);
   console.log(`⏰ Время запуска: ${new Date().toISOString()}`);
   
-  // Периодическая проверка состояния (каждые 3 секунды для детального мониторинга)
+  // Интенсивная проверка состояния (каждые 2 секунды)
   const healthInterval = setInterval(() => {
     try {
       const memUsage = process.memoryUsage();
       const uptime = process.uptime();
-      console.log(`💓 Heartbeat ${new Date().toISOString()} - Memory: ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB, Uptime: ${Math.round(uptime)}s`);
+      const handles = process._getActiveHandles();
+      const requests = process._getActiveRequests();
       
-      // Проверяем состояние сервера
+      console.log(`💓 Heartbeat ${new Date().toISOString()}`);
+      console.log(`   Memory: ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`);
+      console.log(`   Uptime: ${Math.round(uptime)}s`);
+      console.log(`   Active handles: ${handles.length}`);
+      console.log(`   Active requests: ${requests.length}`);
+      console.log(`   Server listening: ${server.listening}`);
+      console.log(`   PID: ${process.pid}`);
+      
+      // Детальная проверка состояния сервера
       if (!server.listening) {
-        console.error('❌ Сервер больше не слушает на порту!');
+        console.error('❌ КРИТИЧНО: Сервер больше не слушает на порту!');
+        console.error('   Server state:', server.readyState);
         clearInterval(healthInterval);
       }
+      
+      // Проверяем event loop
+      if (handles.length === 0 && requests.length === 0) {
+        console.warn('⚠️ Event loop почти пуст - добавляем keep-alive задачи');
+      }
+      
     } catch (error) {
-      console.error('❌ Ошибка в heartbeat:', error.message);
+      console.error('❌ КРИТИЧЕСКАЯ ошибка в heartbeat:', error.message);
       console.error('   Stack:', error.stack);
     }
-  }, 3000);
+  }, 2000);
   
   // Сохраняем интервал для очистки при завершении
   server.healthInterval = healthInterval;
