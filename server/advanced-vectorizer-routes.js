@@ -15,7 +15,18 @@ const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
 
 const router = express.Router();
-const advancedVectorizer = require('../advanced-vectorizer.cjs');
+
+console.log('🔍 Загрузка advanced-vectorizer.cjs...');
+let advancedVectorizer;
+try {
+  advancedVectorizer = require('../advanced-vectorizer.cjs');
+  console.log('  ✓ advanced-vectorizer.cjs загружен успешно');
+  console.log('  ✓ Доступные методы:', Object.keys(advancedVectorizer));
+} catch (error) {
+  console.error('❌ ОШИБКА загрузки advanced-vectorizer.cjs:', error.message);
+  console.error('  Stack:', error.stack);
+  process.exit(1);
+}
 
 // Middleware для логирования запросов векторизатора
 const logVectorizerRequest = (req, res, next) => {
