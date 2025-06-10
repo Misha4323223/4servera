@@ -283,9 +283,9 @@ async function extractDominantColors(imageBuffer, maxColors = 5) {
   try {
     console.log(`🔍 ЭТАП 1: Анализ исходного изображения для извлечения ${maxColors} доминирующих цветов`);
     
-    // Работаем с исходным изображением, уменьшенным для анализа
+    // Работаем с исходным изображением, увеличенным для лучшего анализа
     const { data, info } = await sharp(imageBuffer)
-      .resize(100, 100, { fit: 'inside' })
+      .resize(300, 300, { fit: 'inside' })
       .raw()
       .toBuffer({ resolveWithObject: true });
     
@@ -303,10 +303,10 @@ async function extractDominantColors(imageBuffer, maxColors = 5) {
       // Пропускаем только полностью прозрачные пиксели
       if (info.channels === 4 && data[i + 3] < 10) continue;
       
-      // Легкая квантизация для группировки похожих цветов (менее агрессивная)
-      const quantR = Math.round(r / 16) * 16;
-      const quantG = Math.round(g / 16) * 16;
-      const quantB = Math.round(b / 16) * 16;
+      // Мягкая квантизация для сохранения цветовых нюансов
+      const quantR = Math.round(r / 4) * 4;
+      const quantG = Math.round(g / 4) * 4;
+      const quantB = Math.round(b / 4) * 4;
       
       const colorKey = `${quantR},${quantG},${quantB}`;
       const count = colorMap.get(colorKey) || 0;
@@ -316,10 +316,9 @@ async function extractDominantColors(imageBuffer, maxColors = 5) {
     
     console.log(`🎨 Найдено уникальных цветов: ${colorMap.size}, всего пикселей: ${totalPixels}`);
     
-    // Сортируем цвета по частоте и берем топ
-    const sortedColors = Array.from(colorMap.entries())
+    // Интеллектуальный отбор цветов для шелкографии
+    const allColors = Array.from(colorMap.entries())
       .sort((a, b) => b[1] - a[1])
-      .slice(0, maxColors)
       .map(([colorKey, count]) => {
         const [r, g, b] = colorKey.split(',').map(Number);
         const percentage = ((count / totalPixels) * 100).toFixed(1);
@@ -327,9 +326,51 @@ async function extractDominantColors(imageBuffer, maxColors = 5) {
           r, g, b,
           hex: `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`,
           count,
-          percentage
+          percentage: parseFloat(percentage),
+          brightness: (r * 0.299 + g * 0.587 + b * 0.114), // Яркость для анализа
+          saturation: Math.max(r, g, b) - Math.min(r, g, b) // Насыщенность
         };
       });
+
+    // Фильтруем и выбираем лучшие цвета для печати
+    const filteredColors = [];
+    const minColorDistance = 80; // Минимальное расстояние между цветами
+    const minCoverage = 1.0; // Минимальное покрытие 1%
+
+    for (const color of allColors) {
+      if (filteredColors.length >= maxColors) break;
+      if (color.percentage < minCoverage) continue;
+
+      // Проверяем, достаточно ли цвет отличается от уже выбранных
+      const isDistinct = filteredColors.every(existingColor => {
+        const distance = Math.sqrt(
+          Math.pow(color.r - existingColor.r, 2) +
+          Math.pow(color.g - existingColor.g, 2) +
+          Math.pow(color.b - existingColor.b, 2)
+        );
+        return distance >= minColorDistance;
+      });
+
+      if (isDistinct) {
+        filteredColors.push(color);
+      }
+    }
+
+    // Если не хватает цветов, добавляем контрастные
+    if (filteredColors.length < 2) {
+      const darkColor = { r: 0, g: 0, b: 0, hex: '#000000', count: 1, percentage: 25.0 };
+      const lightColor = { r: 255, g: 255, b: 255, hex: '#ffffff', count: 1, percentage: 25.0 };
+      
+      if (filteredColors.length === 0) {
+        filteredColors.push(darkColor, lightColor);
+      } else if (filteredColors[0].brightness > 128) {
+        filteredColors.push(darkColor);
+      } else {
+        filteredColors.push(lightColor);
+      }
+    }
+
+    const sortedColors = filteredColors;
     
     console.log(`✅ ЭТАП 1 ЗАВЕРШЕН: Извлечено ${sortedColors.length} доминирующих цветов:`);
     sortedColors.forEach((color, i) => {
@@ -363,9 +404,11 @@ async function createColorMask(imageBuffer, targetColor, settings) {
     
     const maskData = Buffer.alloc(info.width * info.height);
     
-    // Адаптивный допуск на основе распространенности цвета
-    const baseTolerance = 50;
-    const adaptiveTolerance = Math.min(80, baseTolerance + (parseFloat(targetColor.percentage) * 2));
+    // Улучшенный адаптивный допуск с учетом насыщенности цвета
+    const baseTolerance = 45;
+    const colorIntensity = Math.max(targetColor.r, targetColor.g, targetColor.b) - Math.min(targetColor.r, targetColor.g, targetColor.b);
+    const intensityBonus = colorIntensity > 100 ? 15 : 5; // Больше допуска для насыщенных цветов
+    const adaptiveTolerance = Math.min(85, baseTolerance + (parseFloat(targetColor.percentage) * 1.5) + intensityBonus);
     
     console.log(`🎯 Используется адаптивный допуск: ${adaptiveTolerance}`);
     
