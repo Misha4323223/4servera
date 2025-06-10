@@ -6,23 +6,58 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Настройка детального логирования в файл
+const logFile = '/tmp/vectorizer-detailed.log';
+const logStream = fs.createWriteStream(logFile, { flags: 'w' });
+
+function detailedLog(message, type = 'INFO') {
+  const timestamp = new Date().toISOString();
+  const logEntry = `[${timestamp}] [${type}] ${message}\n`;
+  
+  // Пишем в файл
+  logStream.write(logEntry);
+  
+  // Также выводим в консоль
+  console.log(`${message}`);
+}
+
+function logError(message, error = null) {
+  const timestamp = new Date().toISOString();
+  let logEntry = `[${timestamp}] [ERROR] ${message}\n`;
+  
+  if (error) {
+    logEntry += `[${timestamp}] [ERROR] Stack: ${error.stack}\n`;
+    logEntry += `[${timestamp}] [ERROR] Message: ${error.message}\n`;
+    logEntry += `[${timestamp}] [ERROR] Type: ${error.constructor.name}\n`;
+  }
+  
+  logStream.write(logEntry);
+  console.error(message);
+  if (error) {
+    console.error('Stack:', error.stack);
+  }
+}
+
+detailedLog('🚀 VECTORIZER SERVER STARTUP INITIATED');
+detailedLog('📁 Log file created: ' + logFile);
 
 // Асинхронная функция запуска сервера
 async function startVectorizerServer() {
   // Импортируем готовые маршруты векторизатора с обработкой ошибок
   let vectorizerRoutes;
   try {
-    console.log('🔍 Загрузка модуля vectorizer routes...');
+    detailedLog('🔍 Загрузка модуля vectorizer routes...');
     vectorizerRoutes = await import('./advanced-vectorizer-routes.js');
     vectorizerRoutes = vectorizerRoutes.default;
-    console.log('  ✓ Vectorizer routes загружены успешно');
+    detailedLog('  ✓ Vectorizer routes загружены успешно');
   } catch (error) {
-    console.error('❌ ОШИБКА загрузки vectorizer routes:', error);
-    console.error('Error stack:', error.stack);
+    logError('❌ ОШИБКА загрузки vectorizer routes', error);
     process.exit(1);
   }
 
@@ -30,14 +65,14 @@ async function startVectorizerServer() {
   const PORT = process.env.VECTORIZER_PORT || 3001;
 
   // Детальное логирование для диагностики
-  console.log('🔍 Диагностика запуска векторизатора:');
-  console.log('  ✓ Express импортирован');
-  console.log('  ✓ CORS импортирован');
-  console.log(`  ✓ Порт: ${PORT}`);
-  console.log('  ✓ __dirname:',  __dirname);
+  detailedLog('🔍 Диагностика запуска векторизатора:');
+  detailedLog('  ✓ Express импортирован');
+  detailedLog('  ✓ CORS импортирован');
+  detailedLog(`  ✓ Порт: ${PORT}`);
+  detailedLog('  ✓ __dirname: ' + __dirname);
 
   // Детальное логирование всех событий процесса
-  console.log('📝 Настройка обработчиков событий процесса...');
+  detailedLog('📝 Настройка обработчиков событий процесса...');
   
   // Логируем все возможные события процесса
   const processEvents = [
@@ -47,31 +82,30 @@ async function startVectorizerServer() {
   
   processEvents.forEach(eventName => {
     process.on(eventName, (...args) => {
-      console.log(`🔔 Process Event: ${eventName} at ${new Date().toISOString()}`);
-      console.log('   Args:', args);
+      detailedLog(`🔔 Process Event: ${eventName}`, 'EVENT');
+      detailedLog(`   Args: ${JSON.stringify(args)}`, 'EVENT');
       
       if (eventName === 'uncaughtException') {
         const error = args[0];
-        console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - uncaughtException:', error.message);
-        console.error('   Error type:', error.constructor.name);
-        console.error('   Stack trace:', error.stack);
+        logError('❌ КРИТИЧЕСКАЯ ОШИБКА - uncaughtException', error);
         process.exit(1);
       }
       
       if (eventName === 'unhandledRejection') {
         const [reason, promise] = args;
-        console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - unhandledRejection:', reason);
-        console.error('   Promise:', promise);
+        logError('❌ КРИТИЧЕСКАЯ ОШИБКА - unhandledRejection: ' + reason);
         if (reason instanceof Error) {
-          console.error('   Stack:', reason.stack);
+          logError('   Rejection stack', reason);
         }
         process.exit(1);
       }
       
       if (eventName === 'warning') {
         const warning = args[0];
-        console.warn('⚠️ Process Warning:', warning.name, warning.message);
-        console.warn('   Stack:', warning.stack);
+        detailedLog(`⚠️ Process Warning: ${warning.name} - ${warning.message}`, 'WARN');
+        if (warning.stack) {
+          detailedLog(`   Stack: ${warning.stack}`, 'WARN');
+        }
       }
     });
   });
@@ -370,13 +404,8 @@ server.on('connection', (socket) => {
   console.log('✅ Векторизатор полностью инициализирован и готов к работе');
 }
 
-// Запуск сервера с await
-(async () => {
-  try {
-    await startVectorizerServer();
-  } catch (error) {
-    console.error('❌ Критическая ошибка при запуске векторизатора:', error);
-    console.error('Stack:', error.stack);
-    process.exit(1);
-  }
-})();
+// Простой запуск сервера
+startVectorizerServer().catch(error => {
+  console.error('❌ Ошибка запуска:', error.message);
+  process.exit(1);
+});
