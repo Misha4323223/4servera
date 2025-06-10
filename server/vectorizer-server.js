@@ -167,13 +167,7 @@ async function startVectorizerServer() {
     });
   });
 
-  process.on('exit', (code) => {
-    console.log(`🚪 Process exiting with code: ${code} at ${new Date().toISOString()}`);
-  });
 
-  process.on('beforeExit', (code) => {
-    console.log(`🚪 Before exit with code: ${code} at ${new Date().toISOString()}`);
-  });
 
 // Настройка CORS для кросс-доменных запросов
 app.use(cors({
@@ -183,22 +177,6 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-// Детальное логирование всех HTTP запросов
-app.use((req, res, next) => {
-  const timestamp = new Date().toISOString();
-  console.log(`🌐 HTTP ${req.method} ${req.url} from ${req.ip} at ${timestamp}`);
-  console.log(`   User-Agent: ${req.get('User-Agent')}`);
-  
-  // Логируем ответ
-  const originalSend = res.send;
-  res.send = function(data) {
-    console.log(`📤 Response ${res.statusCode} for ${req.method} ${req.url} at ${new Date().toISOString()}`);
-    return originalSend.call(this, data);
-  };
-  
-  next();
-});
-
 // Middleware для парсинга JSON и URL-encoded данных
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -206,7 +184,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Статическая раздача выходных файлов векторизатора
 app.use('/output', express.static(path.join(__dirname, '..', 'output')));
 
-// Логирование запросов
+// Логирование запросов (единое middleware)
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] ${req.method} ${req.path} - Vectorizer Server`);
@@ -358,34 +336,11 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   }, 5000);
   keepAliveIntervals.push(mainKeepAlive);
   
-  // Дополнительные интервалы для усиления
-  const auxKeepAlive1 = setInterval(() => {
-    // Пустая функция для удержания event loop
-  }, 1000);
-  keepAliveIntervals.push(auxKeepAlive1);
+  // Удаляем избыточные интервалы
   
-  const auxKeepAlive2 = setInterval(() => {
-    // Еще один интервал
-  }, 3000);
-  keepAliveIntervals.push(auxKeepAlive2);
+
   
-  // TCP keep-alive механизм (синхронный импорт)
-  import('net').then(net => {
-    const dummyServer = net.createServer();
-    dummyServer.listen(0, () => {
-      detailedLog(`🔌 Dummy TCP server для keep-alive на порту: ${dummyServer.address().port}`, 'KEEPALIVE');
-    });
-    server.dummyServer = dummyServer;
-  });
-  
-  // Принудительное удержание через setTimeout цепочку
-  function chainedTimeout() {
-    setTimeout(() => {
-      detailedLog('⏰ Chained timeout executed', 'KEEPALIVE');
-      chainedTimeout(); // Рекурсивная цепочка
-    }, 10000);
-  }
-  chainedTimeout();
+
   
   // Сохраняем keep-alive интервалы
   server.keepAliveIntervals = keepAliveIntervals;
@@ -397,9 +352,10 @@ const server = app.listen(PORT, '0.0.0.0', () => {
       clearInterval(server.healthInterval);
       console.log('  ✓ Health interval очищен');
     }
-    if (server.keepAliveInterval) {
-      clearInterval(server.keepAliveInterval);
-      console.log('  ✓ Keep-alive interval очищен');
+    // Очищаем все keep-alive интервалы
+    if (server.keepAliveIntervals) {
+      server.keepAliveIntervals.forEach(interval => clearInterval(interval));
+      console.log('  ✓ Keep-alive intervals очищены');
     }
     if (server.listening) {
       server.close(() => {
@@ -467,50 +423,11 @@ serverEvents.forEach(eventName => {
     if (eventName === 'connection') {
       const socket = args[0];
       detailedLog(`🔗 NEW CONNECTION established`, 'NETWORK');
-      
-      // Отслеживание событий сокета
-      const socketEvents = ['error', 'close', 'timeout', 'end', 'drain', 'data'];
-      socketEvents.forEach(sockEvent => {
-        socket.on(sockEvent, (...sockArgs) => {
-          detailedLog(`🔌 SOCKET EVENT: ${sockEvent}`, 'SOCKET');
-          
-          if (sockEvent === 'error') {
-            const sockError = sockArgs[0];
-            logError('❌ Socket error detected', sockError);
-          }
-          
-          if (sockEvent === 'close') {
-            const hadError = sockArgs[0];
-            detailedLog(`🔌 Socket closed, hadError: ${hadError}`, 'SOCKET');
-          }
-        });
-      });
     }
   });
 });
 
-  // Graceful shutdown
-  process.on('SIGTERM', () => {
-    console.log('🛑 Vectorizer Server получил SIGTERM, завершение...');
-    if (server.healthInterval) {
-      clearInterval(server.healthInterval);
-    }
-    server.close(() => {
-      console.log('✅ Сервер корректно закрыт');
-      process.exit(0);
-    });
-  });
 
-  process.on('SIGINT', () => {
-    console.log('🛑 Vectorizer Server получил SIGINT, завершение...');
-    if (server.healthInterval) {
-      clearInterval(server.healthInterval);
-    }
-    server.close(() => {
-      console.log('✅ Сервер корректно закрыт');
-      process.exit(0);
-    });
-  });
 
   // Предотвращаем автоматическое завершение процесса
   console.log('🔒 Процесс зафиксирован для работы сервера');
@@ -520,24 +437,7 @@ serverEvents.forEach(eventName => {
     // Пустая функция для поддержания event loop
   }, 30000);
   
-  // Добавляем обработчик для отладки неожиданного завершения
-  process.on('exit', (code) => {
-    console.log(`🚪 Process exiting with code: ${code} at ${new Date().toISOString()}`);
-    console.log('   Last heartbeat was running, unexpected exit detected');
-    clearInterval(keepAlive);
-    if (server.healthInterval) {
-      clearInterval(server.healthInterval);
-    }
-  });
 
-  process.on('beforeExit', (code) => {
-    console.log(`🚪 Before exit with code: ${code} at ${new Date().toISOString()}`);
-    console.log('   Event loop became empty, this should not happen with server running');
-    // Принудительно поддерживаем процесс живым
-    setTimeout(() => {
-      console.log('⚡ Keep-alive timeout executed');
-    }, 1000);
-  });
   
   // Сервер запущен, процесс будет работать бесконечно
   console.log('✅ Векторизатор полностью инициализирован и готов к работе');
