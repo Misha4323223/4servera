@@ -236,23 +236,8 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   // Сохраняем интервал для очистки при завершении
   server.healthInterval = healthInterval;
   
-  // МНОЖЕСТВЕННЫЕ механизмы удержания процесса
-  const keepAliveIntervals = [];
+  // HTTP сервер сам поддерживает процесс активным
   
-  // Основной keep-alive интервал  
-  const mainKeepAlive = setInterval(() => {
-    detailedLog(`🔄 MAIN Keep-alive: процесс активен, PID: ${process.pid}`, 'KEEPALIVE');
-  }, 5000);
-  keepAliveIntervals.push(mainKeepAlive);
-  
-  // Удаляем избыточные интервалы
-  
-
-  
-
-  
-  // Сохраняем keep-alive интервалы
-  server.keepAliveIntervals = keepAliveIntervals;
   
   // Обновляем обработчики завершения для очистки интервалов
   const cleanupAndExit = (code = 0) => {
@@ -261,11 +246,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
       clearInterval(server.healthInterval);
       console.log('  ✓ Health interval очищен');
     }
-    // Очищаем все keep-alive интервалы
-    if (server.keepAliveIntervals) {
-      server.keepAliveIntervals.forEach(interval => clearInterval(interval));
-      console.log('  ✓ Keep-alive intervals очищены');
-    }
+
     if (server.listening) {
       server.close(() => {
         console.log('  ✓ HTTP сервер закрыт');
