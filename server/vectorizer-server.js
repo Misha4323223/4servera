@@ -418,13 +418,11 @@ app.use((err, req, res, next) => {
 
   });
 
-  console.log('✅ Векторизатор полностью инициализирован и готов к работе');
-});
-
+  detailedLog('✅ Векторизатор полностью инициализирован и готов к работе');
 }
 
-// Простой запуск сервера
+// Запуск сервера
 startVectorizerServer().catch(error => {
-  console.error('❌ Ошибка запуска:', error.message);
+  logError('❌ КРИТИЧЕСКАЯ ОШИБКА запуска сервера', error);
   process.exit(1);
 });

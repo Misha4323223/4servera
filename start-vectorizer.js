@@ -15,11 +15,26 @@ console.log('🎨 Запуск BOOOMERANGS AI Vectorizer Server...');
 
 const vectorizerPath = path.join(__dirname, 'server', 'vectorizer-server.js');
 
-const vectorizer = spawn('node', [vectorizerPath], {
+// Этап 2: Добавляем флаги Node.js для максимальной диагностики
+const nodeFlags = [
+  '--trace-warnings',           // Показать все предупреждения
+  '--trace-uncaught',          // Трассировка необработанных исключений  
+  '--trace-exit',              // Трассировка exit events
+  '--trace-sigint',            // Трассировка SIGINT
+  '--max-old-space-size=512',  // Ограничение памяти для контроля
+  '--report-uncaught-exception', // Детальные отчеты об ошибках
+  vectorizerPath
+];
+
+console.log('🔍 Запуск с диагностическими флагами для точного определения ошибки');
+
+const vectorizer = spawn('node', nodeFlags, {
   stdio: 'inherit',
   env: {
     ...process.env,
-    VECTORIZER_PORT: process.env.VECTORIZER_PORT || '3005'
+    VECTORIZER_PORT: process.env.VECTORIZER_PORT || '3005',
+    NODE_ENV: 'development',
+    DEBUG: '*'
   }
 });
 
