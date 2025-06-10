@@ -29,6 +29,7 @@ const SmartLogger = {
 // Импортируем провайдеры
 const chatFreeProvider = require('./chatfree-provider');
 const advancedVectorizer = require('../advanced-vectorizer.cjs');
+const vectorizerManager = require('./vectorizer-manager');
 const printOptimizer = require('./print-optimizer');
 const deepspeekProvider = require('./deepspeek-provider');
 const claudeProvider = require('./claude-provider');
@@ -224,18 +225,36 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
           const response = await fetch(lastImageUrl);
           const imageBuffer = await response.buffer();
           
-          // Выполняем профессиональную векторизацию
-          const result = await advancedVectorizer.professionalVectorize(
-            imageBuffer,
-            'user_image',
-            {
-              quality,
-              formats,
-              optimizeFor,
-              generatePreviews,
-              includeMetadata: true
-            }
-          );
+          // Проверяем доступность векторизатор-менеджера
+          let result;
+          try {
+            // Пытаемся использовать векторизатор-менеджер
+            result = await vectorizerManager.professionalVectorize(
+              imageBuffer,
+              'user_image',
+              {
+                quality,
+                formats,
+                optimizeFor,
+                generatePreviews,
+                includeMetadata: true
+              }
+            );
+          } catch (managerError) {
+            SmartLogger.route('Векторизатор-менеджер недоступен, используем прямой вызов');
+            // Fallback к прямому вызову модуля
+            result = await advancedVectorizer.professionalVectorize(
+              imageBuffer,
+              'user_image',
+              {
+                quality,
+                formats,
+                optimizeFor,
+                generatePreviews,
+                includeMetadata: true
+              }
+            );
+          }
           
           if (result.success) {
             let responseText = `🎨 **Профессиональная векторизация завершена!**\n\n`;

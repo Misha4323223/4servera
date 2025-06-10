@@ -310,6 +310,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     Logger.error('Не удалось подключить модуль векторизации:', error);
   }
   
+  // Статус векторизатора
+  app.get('/api/vectorizer-status', async (req, res) => {
+    try {
+      const vectorizerManager = require('./vectorizer-manager');
+      const status = await vectorizerManager.checkHealth();
+      res.json({
+        success: true,
+        vectorizer: status,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      res.json({
+        success: false,
+        vectorizer: { status: 'unavailable', available: false },
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+  
   // API для Flask-стриминга (надежный вариант)
   const flaskStreamBridge = require('./stream-flask-bridge');
   app.use('/api/flask-stream', flaskStreamBridge);

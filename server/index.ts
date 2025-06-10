@@ -6,10 +6,16 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import cors from 'cors';
 
-// Инициализируем векторизатор-менеджер
-const { createRequire } = require('module');
-const require = createRequire(import.meta.url);
-const vectorizerManager = require('./vectorizer-manager');
+// Инициализируем векторизатор-менеджер (lazy loading)
+let vectorizerManager: any = null;
+try {
+  const { createRequire } = require('module');
+  const customRequire = createRequire(import.meta.url);
+  vectorizerManager = customRequire('./vectorizer-manager');
+  log('Vectorizer Manager initialized');
+} catch (error) {
+  log('Vectorizer Manager initialization deferred');
+}
 
 const app = express();
 app.use(cors()); // Разрешаем CORS для всех маршрутов
