@@ -199,169 +199,212 @@ async function quantizeColorsAI(imageBuffer, maxColors = 5) {
 }
 
 /**
- * Создание цветного SVG для шелкографии
+ * ЭТАП 3: Создание цветного SVG для шелкографии с полным логированием
  */
 async function createSilkscreenSVG(imageBuffer, settings) {
   const sharp = require('sharp');
   const potrace = require('potrace');
   
-  console.log('🎨 Создание цветного SVG для шелкографии...');
+  console.log('🔍 ЭТАП 3: Начинаем создание цветного SVG для шелкографии...');
   
   try {
-    // Извлекаем доминирующие цвета из квантизованного изображения
+    // Извлекаем доминирующие цвета из исходного изображения
     const dominantColors = await extractDominantColors(imageBuffer, settings.maxColors);
-    console.log(`🎨 Извлечены цвета:`, dominantColors);
+    
+    if (!dominantColors || dominantColors.length === 0) {
+      console.log('❌ ЭТАП 3: Не удалось извлечь цвета, переходим к монохромному режиму');
+      return createMonochromeBackup(imageBuffer, settings);
+    }
+    
+    console.log(`🎨 ЭТАП 3: Начинаем обработку ${dominantColors.length} цветов`);
     
     // Создаем отдельный слой для каждого цвета
     const colorLayers = [];
     
     for (let i = 0; i < dominantColors.length; i++) {
       const color = dominantColors[i];
-      console.log(`🔍 Обрабатываем цвет ${i + 1}/${dominantColors.length}: ${color.hex}`);
+      console.log(`\n🔍 ЭТАП 3.${i + 1}: Обрабатываем цвет ${color.hex} (${color.percentage}%)`);
       
       // Создаем маску для этого цвета
       const colorMask = await createColorMask(imageBuffer, color, settings);
       
       if (colorMask) {
+        console.log(`🎯 ЭТАП 3.${i + 1}: Маска создана, запускаем векторизацию...`);
+        
         // Векторизуем маску через potrace
         const layerSVG = await vectorizeColorLayer(colorMask, color, settings);
         if (layerSVG) {
+          const paths = extractSVGPaths(layerSVG);
+          console.log(`✅ ЭТАП 3.${i + 1}: Векторизация успешна, извлечено ${paths.length} путей`);
+          
           colorLayers.push({
             color: color.hex,
             svg: layerSVG,
-            paths: extractSVGPaths(layerSVG)
+            paths: paths,
+            originalPercentage: color.percentage
           });
+        } else {
+          console.log(`❌ ЭТАП 3.${i + 1}: Ошибка векторизации для цвета ${color.hex}`);
         }
+      } else {
+        console.log(`⚠️ ЭТАП 3.${i + 1}: Маска не создана для цвета ${color.hex}`);
       }
     }
     
-    // Объединяем все цветные слои в один SVG
-    const finalSVG = combineColorLayers(colorLayers, imageBuffer);
+    console.log(`\n📊 ЭТАП 3: Итоги обработки цветов:`);
+    console.log(`   - Исходных цветов: ${dominantColors.length}`);
+    console.log(`   - Успешно обработано: ${colorLayers.length}`);
     
-    console.log(`✅ Цветной SVG создан с ${colorLayers.length} цветами`);
+    if (colorLayers.length === 0) {
+      console.log('❌ ЭТАП 3: Ни один цвет не был успешно обработан, переходим к монохромному режиму');
+      return createMonochromeBackup(imageBuffer, settings);
+    }
+    
+    // Объединяем все цветные слои в один SVG
+    console.log('🔗 ЭТАП 3: Объединяем цветные слои в финальный SVG...');
+    const finalSVG = await combineColorLayers(colorLayers, imageBuffer);
+    
+    console.log(`✅ ЭТАП 3 ЗАВЕРШЕН: Цветной SVG создан с ${colorLayers.length} активными слоями`);
     return finalSVG;
     
   } catch (error) {
-    console.error('❌ Ошибка создания цветного SVG:', error);
-    // Fallback к монохромному potrace
+    console.error('❌ ЭТАП 3 КРИТИЧЕСКАЯ ОШИБКА:', error);
+    console.log('🔄 ЭТАП 3: Переходим к резервному монохромному режиму');
     return createMonochromeBackup(imageBuffer, settings);
   }
 }
 
 /**
- * Упрощенное извлечение доминирующих цветов - ИСПРАВЛЕННАЯ ВЕРСИЯ
+ * Извлечение доминирующих цветов из ИСХОДНОГО изображения (без двойной квантизации)
  */
 async function extractDominantColors(imageBuffer, maxColors = 5) {
   const sharp = require('sharp');
   
   try {
-    // Используем квантизованное изображение напрямую
-    const quantizedBuffer = await sharp(imageBuffer)
-      .png({
-        palette: true,
-        colors: maxColors,
-        dither: 0.5
-      })
-      .toBuffer();
+    console.log(`🔍 ЭТАП 1: Анализ исходного изображения для извлечения ${maxColors} доминирующих цветов`);
     
-    // Анализируем квантизованное изображение
-    const { data, info } = await sharp(quantizedBuffer)
-      .resize(50, 50, { fit: 'inside' })
+    // Работаем с исходным изображением, уменьшенным для анализа
+    const { data, info } = await sharp(imageBuffer)
+      .resize(100, 100, { fit: 'inside' })
       .raw()
       .toBuffer({ resolveWithObject: true });
     
-    const colorMap = new Map();
+    console.log(`📊 Анализируем изображение ${info.width}x${info.height}, каналов: ${info.channels}`);
     
-    // Собираем уникальные цвета
+    const colorMap = new Map();
+    let totalPixels = 0;
+    
+    // Собираем ВСЕ цвета без агрессивной фильтрации
     for (let i = 0; i < data.length; i += info.channels) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
       
-      // Пропускаем полностью прозрачные или слишком темные/светлые пиксели
-      if (info.channels === 4 && data[i + 3] < 128) continue;
-      if (r + g + b < 30 || r + g + b > 750) continue;
+      // Пропускаем только полностью прозрачные пиксели
+      if (info.channels === 4 && data[i + 3] < 10) continue;
       
-      const colorKey = `${r},${g},${b}`;
+      // Легкая квантизация для группировки похожих цветов (менее агрессивная)
+      const quantR = Math.round(r / 16) * 16;
+      const quantG = Math.round(g / 16) * 16;
+      const quantB = Math.round(b / 16) * 16;
+      
+      const colorKey = `${quantR},${quantG},${quantB}`;
       const count = colorMap.get(colorKey) || 0;
       colorMap.set(colorKey, count + 1);
+      totalPixels++;
     }
     
-    // Сортируем и возвращаем топ цвета
+    console.log(`🎨 Найдено уникальных цветов: ${colorMap.size}, всего пикселей: ${totalPixels}`);
+    
+    // Сортируем цвета по частоте и берем топ
     const sortedColors = Array.from(colorMap.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, maxColors)
       .map(([colorKey, count]) => {
         const [r, g, b] = colorKey.split(',').map(Number);
+        const percentage = ((count / totalPixels) * 100).toFixed(1);
         return {
           r, g, b,
           hex: `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`,
-          count
+          count,
+          percentage
         };
       });
     
-    console.log(`🎨 Извлечено цветов: ${sortedColors.length}`, sortedColors.map(c => c.hex));
-    
-    // Если не найдено цветов, возвращаем контрастные базовые
-    if (sortedColors.length === 0) {
-      return [
-        { r: 0, g: 0, b: 0, hex: '#000000', count: 1 },
-        { r: 255, g: 255, b: 255, hex: '#ffffff', count: 1 }
-      ];
-    }
+    console.log(`✅ ЭТАП 1 ЗАВЕРШЕН: Извлечено ${sortedColors.length} доминирующих цветов:`);
+    sortedColors.forEach((color, i) => {
+      console.log(`  ${i + 1}. ${color.hex} (${color.percentage}%)`);
+    });
     
     return sortedColors;
     
   } catch (error) {
-    console.error('Ошибка извлечения цветов:', error);
+    console.error('❌ ЭТАП 1 ОШИБКА - Извлечение цветов:', error);
     // Возвращаем контрастную палитру для шелкографии
     return [
-      { r: 0, g: 0, b: 0, hex: '#000000', count: 1 },
-      { r: 255, g: 0, b: 0, hex: '#ff0000', count: 1 },
-      { r: 0, g: 0, b: 255, hex: '#0000ff', count: 1 },
-      { r: 255, g: 255, b: 255, hex: '#ffffff', count: 1 }
+      { r: 0, g: 0, b: 0, hex: '#000000', count: 1, percentage: '50.0' },
+      { r: 255, g: 255, b: 255, hex: '#ffffff', count: 1, percentage: '50.0' }
     ];
   }
 }
 
 /**
- * Улучшенное создание цветовой маски для конкретного цвета
+ * ЭТАП 2: Создание точных цветовых масок с адаптивным допуском
  */
 async function createColorMask(imageBuffer, targetColor, settings) {
   const sharp = require('sharp');
   
   try {
+    console.log(`🔍 ЭТАП 2: Создание маски для цвета ${targetColor.hex} (${targetColor.percentage}% изображения)`);
+    
     const { data, info } = await sharp(imageBuffer)
       .raw()
       .toBuffer({ resolveWithObject: true });
     
-    const maskData = Buffer.alloc(info.width * info.height); // Только один канал
-    const tolerance = 60; // Увеличенный допуск для лучшего захвата
+    const maskData = Buffer.alloc(info.width * info.height);
+    
+    // Адаптивный допуск на основе распространенности цвета
+    const baseTolerance = 50;
+    const adaptiveTolerance = Math.min(80, baseTolerance + (parseFloat(targetColor.percentage) * 2));
+    
+    console.log(`🎯 Используется адаптивный допуск: ${adaptiveTolerance}`);
+    
     let pixelCount = 0;
+    let minDistance = Infinity;
+    let maxDistance = 0;
     
-    console.log(`🎯 Создание маски для цвета ${targetColor.hex} с допуском ${tolerance}`);
-    
-    // Создаем маску для целевого цвета
+    // Создаем маску с более точным алгоритмом сравнения цветов
     for (let i = 0; i < data.length; i += info.channels) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
       
-      // Используем улучшенное вычисление расстояния (weighted RGB)
-      const deltaR = r - targetColor.r;
-      const deltaG = g - targetColor.g;
-      const deltaB = b - targetColor.b;
+      // Пропускаем прозрачные пиксели
+      if (info.channels === 4 && data[i + 3] < 10) continue;
       
-      // Взвешенное расстояние учитывает восприятие человеческим глазом
+      // Используем квантизованное сравнение (как при извлечении цветов)
+      const quantR = Math.round(r / 16) * 16;
+      const quantG = Math.round(g / 16) * 16;
+      const quantB = Math.round(b / 16) * 16;
+      
+      // Вычисляем расстояние до целевого цвета
+      const deltaR = quantR - targetColor.r;
+      const deltaG = quantG - targetColor.g;
+      const deltaB = quantB - targetColor.b;
+      
+      // Перцептивное расстояние (более близкое к человеческому восприятию)
       const colorDistance = Math.sqrt(
         2 * deltaR * deltaR +
         4 * deltaG * deltaG +
         3 * deltaB * deltaB
       );
       
+      minDistance = Math.min(minDistance, colorDistance);
+      maxDistance = Math.max(maxDistance, colorDistance);
+      
       const pixelIndex = Math.floor(i / info.channels);
       
-      if (colorDistance <= tolerance) {
+      if (colorDistance <= adaptiveTolerance) {
         maskData[pixelIndex] = 255; // Белый пиксель (область цвета)
         pixelCount++;
       } else {
@@ -369,15 +412,19 @@ async function createColorMask(imageBuffer, targetColor, settings) {
       }
     }
     
-    console.log(`📊 Маска для ${targetColor.hex}: ${pixelCount} пикселей (${((pixelCount / (info.width * info.height)) * 100).toFixed(1)}%)`);
+    const coveragePercent = ((pixelCount / (info.width * info.height)) * 100).toFixed(1);
+    console.log(`📊 Маска для ${targetColor.hex}:`);
+    console.log(`   - Захвачено пикселей: ${pixelCount} (${coveragePercent}%)`);
+    console.log(`   - Расстояние: мин=${minDistance.toFixed(1)}, макс=${maxDistance.toFixed(1)}`);
     
-    // Если маска слишком мала, возвращаем null
-    if (pixelCount < 100) {
-      console.log(`⚠️ Слишком мало пикселей для цвета ${targetColor.hex}, пропускаем`);
+    // Проверяем минимальное покрытие
+    const minCoverageThreshold = Math.max(0.5, parseFloat(targetColor.percentage) * 0.3);
+    if (parseFloat(coveragePercent) < minCoverageThreshold) {
+      console.log(`⚠️ ЭТАП 2: Недостаточное покрытие для ${targetColor.hex} (${coveragePercent}% < ${minCoverageThreshold}%), пропускаем`);
       return null;
     }
     
-    // Создаем изображение из маски (grayscale)
+    // Создаем изображение из маски
     const maskBuffer = await sharp(maskData, {
       raw: {
         width: info.width,
@@ -388,10 +435,11 @@ async function createColorMask(imageBuffer, targetColor, settings) {
     .png()
     .toBuffer();
     
+    console.log(`✅ ЭТАП 2: Маска для ${targetColor.hex} создана успешно`);
     return maskBuffer;
     
   } catch (error) {
-    console.error('Ошибка создания цветовой маски:', error);
+    console.error(`❌ ЭТАП 2 ОШИБКА - Создание маски для ${targetColor.hex}:`, error);
     return null;
   }
 }
@@ -445,16 +493,20 @@ function extractSVGPaths(svgContent) {
 }
 
 /**
- * Объединение цветных слоев в финальный SVG
+ * ЭТАП 4: Объединение цветных слоев в финальный многослойный SVG
  */
 async function combineColorLayers(colorLayers, originalImageBuffer) {
   const sharp = require('sharp');
   
   try {
+    console.log(`🔗 ЭТАП 4: Начинаем объединение ${colorLayers.length} цветных слоев`);
+    
     // Получаем размеры оригинального изображения
     const metadata = await sharp(originalImageBuffer).metadata();
     const width = metadata.width;
     const height = metadata.height;
+    
+    console.log(`📐 ЭТАП 4: Размеры SVG: ${width}x${height}`);
     
     let svgContent = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
@@ -462,25 +514,48 @@ async function combineColorLayers(colorLayers, originalImageBuffer) {
   <desc>Векторизация с сохранением цветов для печати</desc>
 `;
     
-    // Добавляем каждый цветной слой
+    let totalPaths = 0;
+    
+    // Добавляем каждый цветной слой с детальным логированием
     colorLayers.forEach((layer, index) => {
-      svgContent += `  <g id="color-layer-${index + 1}" fill="${layer.color}" stroke="none">\n`;
+      const layerNumber = index + 1;
+      console.log(`🎨 ЭТАП 4.${layerNumber}: Добавляем слой для цвета ${layer.color}`);
+      console.log(`   - Путей в слое: ${layer.paths.length}`);
+      console.log(`   - Исходное покрытие: ${layer.originalPercentage}%`);
       
+      svgContent += `  <g id="color-layer-${layerNumber}" fill="${layer.color}" stroke="none">\n`;
+      
+      let validPaths = 0;
       layer.paths.forEach((path, pathIndex) => {
-        if (path && path.trim()) {
+        if (path && path.trim() && path.length > 10) { // Фильтруем слишком короткие пути
           svgContent += `    <path d="${path}" />\n`;
+          validPaths++;
+          totalPaths++;
         }
       });
       
       svgContent += `  </g>\n`;
+      
+      console.log(`✅ ЭТАП 4.${layerNumber}: Добавлено ${validPaths} валидных путей для ${layer.color}`);
     });
     
     svgContent += `</svg>`;
     
+    console.log(`📊 ЭТАП 4: Итоговая статистика SVG:`);
+    console.log(`   - Всего слоев: ${colorLayers.length}`);
+    console.log(`   - Всего путей: ${totalPaths}`);
+    console.log(`   - Размер контента: ${(svgContent.length / 1024).toFixed(1)} КБ`);
+    
+    if (totalPaths === 0) {
+      console.log('❌ ЭТАП 4: Нет валидных путей, создаем резервный SVG');
+      return createMonochromeBackup(originalImageBuffer, { threshold: 128 });
+    }
+    
+    console.log(`✅ ЭТАП 4 ЗАВЕРШЕН: Многослойный SVG создан успешно`);
     return svgContent;
     
   } catch (error) {
-    console.error('Ошибка объединения слоев:', error);
+    console.error('❌ ЭТАП 4 ОШИБКА - Объединение слоев:', error);
     return createMonochromeBackup(originalImageBuffer, { threshold: 128 });
   }
 }
