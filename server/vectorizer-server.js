@@ -12,6 +12,9 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Определяем порт для векторизатора
+const PORT = process.env.VECTORIZER_PORT || 3001;
+
 // Настройка детального логирования в файл
 const logFile = '/tmp/vectorizer-detailed.log';
 const logStream = fs.createWriteStream(logFile, { flags: 'w' });
@@ -116,6 +119,9 @@ async function startVectorizerServer() {
     console.error('❌ FATAL: unhandledRejection:', reason);
     process.exit(1);
   });
+
+  // Создание Express приложения
+  const app = express();
 
   // Настройка CORS для кросс-доменных запросов
   app.use(cors({
@@ -286,9 +292,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     if (server.healthInterval) {
       clearInterval(server.healthInterval);
     }
-    if (server.keepAliveIntervals) {
-      server.keepAliveIntervals.forEach(interval => clearInterval(interval));
-    }
+
   });
 
   console.log('✅ Векторизатор полностью инициализирован и готов к работе');
