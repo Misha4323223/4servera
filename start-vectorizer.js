@@ -13,7 +13,7 @@ const __dirname = path.dirname(__filename);
 
 console.log('🎨 Запуск BOOOMERANGS AI Vectorizer Server...');
 
-const vectorizerPath = path.join(__dirname, 'server', 'vectorizer-server.js');
+const vectorizerPath = path.join(__dirname, 'server', 'vectorizer-server-simple.js');
 
 const vectorizer = spawn('node', [vectorizerPath], {
   stdio: 'inherit',
