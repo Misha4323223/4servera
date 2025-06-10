@@ -142,12 +142,19 @@ async function startVectorizerServer() {
         logSystemState('process-exit');
         detailedLog(`🚪 PROCESS EXIT CODE: ${args[0]}`, 'EXIT');
         detailedLog(`   Exit reason: Normal termination or forced exit`, 'EXIT');
+        detailedLog(`   Stack trace at exit: ${new Error().stack}`, 'EXIT');
       }
       
       if (eventName === 'beforeExit') {
         logSystemState('before-exit');
         detailedLog(`🚪 BEFORE EXIT CODE: ${args[0]}`, 'EXIT');
         detailedLog(`   Event loop empty, process about to exit`, 'EXIT');
+        detailedLog(`   Stack trace at beforeExit: ${new Error().stack}`, 'EXIT');
+        
+        // Попытка спасти процесс
+        setTimeout(() => {
+          detailedLog('🆘 RESCUE ATTEMPT: Adding timeout to prevent exit', 'EXIT');
+        }, 100);
       }
       
       if (eventName === 'warning') {
@@ -278,6 +285,11 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   // Интенсивная проверка состояния с глубокой диагностикой
   const healthInterval = setInterval(() => {
     try {
+      // ДЕТАЛЬНАЯ ДИАГНОСТИКА ВНУТРИ HEALTHINTERVAL
+      detailedLog(`🌀 HealthInterval АКТИВЕН — server.listening=${server.listening}`, 'HEALTH_DEBUG');
+      detailedLog(`🌀 HealthInterval ID: ${healthInterval._idleTimeout}ms, repeat=${healthInterval._repeat}`, 'HEALTH_DEBUG');
+      detailedLog(`🌀 Process PID: ${process.pid}, uptime: ${process.uptime()}s`, 'HEALTH_DEBUG');
+      
       logSystemState('heartbeat');
       
       const memUsage = process.memoryUsage();
@@ -285,7 +297,14 @@ const server = app.listen(PORT, '0.0.0.0', () => {
       const handles = process._getActiveHandles();
       const requests = process._getActiveRequests();
       
+      // Проверяем что интервал не очистился
+      if (!healthInterval || healthInterval._destroyed) {
+        detailedLog('❌ CRITICAL: HealthInterval был уничтожен!', 'HEALTH_DEBUG');
+        logSystemState('interval-destroyed');
+      }
+      
       detailedLog(`💓 HEARTBEAT: Uptime=${Math.round(uptime)}s, Memory=${Math.round(memUsage.heapUsed / 1024 / 1024)}MB, Handles=${handles.length}`, 'HEARTBEAT');
+      detailedLog(`💓 HEARTBEAT DETAILS: server.listening=${server.listening}, server.address=${JSON.stringify(server.address())}`, 'HEARTBEAT');
       
       // Критическая проверка состояния сервера
       if (!server.listening) {
@@ -294,6 +313,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
         detailedLog(`   Server connections: ${server.connections || 'unknown'}`, 'CRITICAL');
         logSystemState('server-not-listening');
         clearInterval(healthInterval);
+        detailedLog('❌ HealthInterval CLEARED due to server not listening', 'HEALTH_DEBUG');
       }
       
       // Проверка утечек памяти
@@ -317,8 +337,11 @@ const server = app.listen(PORT, '0.0.0.0', () => {
         });
       }
       
+      detailedLog(`🌀 HealthInterval ЗАВЕРШЕН успешно`, 'HEALTH_DEBUG');
+      
     } catch (error) {
       logError('❌ CRITICAL heartbeat error', error);
+      detailedLog(`❌ HealthInterval ERROR: ${error.message}`, 'HEALTH_DEBUG');
       logSystemState('heartbeat-error');
     }
   }, 2000);
