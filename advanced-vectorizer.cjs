@@ -932,8 +932,15 @@ async function createAdobeLimitedColorSVG(imageBuffer, settings) {
     const dominantColors = await extractAdobeColors(imageBuffer, settings.maxColors);
     
     if (!dominantColors || dominantColors.length === 0) {
-      console.log('❌ Не удалось извлечь цвета, используем резервный режим');
-      return createAdobeMonoSVG(imageBuffer, settings);
+      console.log('❌ K-means сбой, принудительно создаем базовые цвета для шелкографии');
+      // Принудительное создание базовой цветовой палитры для шелкографии
+      dominantColors = [
+        { r: 0, g: 0, b: 0, hex: '#000000', percentage: '40.0' },       // Черный
+        { r: 255, g: 255, b: 255, hex: '#ffffff', percentage: '35.0' }, // Белый
+        { r: 128, g: 128, b: 128, hex: '#808080', percentage: '15.0' }, // Серый
+        { r: 200, g: 200, b: 200, hex: '#c8c8c8', percentage: '10.0' }  // Светло-серый
+      ];
+      console.log('🎨 Используем принудительную палитру: 4 цвета для шелкографии');
     }
     
     console.log(`🎨 Adobe цвета: ${dominantColors.length}`);
