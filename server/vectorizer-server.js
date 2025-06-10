@@ -227,6 +227,53 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   
   // Сохраняем интервал для очистки при завершении
   server.healthInterval = healthInterval;
+  
+  // Принудительно держим процесс живым - создаем постоянный интервал
+  const keepAliveInterval = setInterval(() => {
+    // Этот интервал существует только для поддержания event loop
+    // Логируем раз в минуту чтобы не засорять вывод
+    if (Date.now() % 60000 < 2000) {
+      console.log(`🔄 Keep-alive: процесс активен, PID: ${process.pid}`);
+    }
+  }, 1000);
+  
+  // Сохраняем keep-alive интервал
+  server.keepAliveInterval = keepAliveInterval;
+  
+  // Обновляем обработчики завершения для очистки интервалов
+  const cleanupAndExit = (code = 0) => {
+    console.log(`🧹 Очистка ресурсов перед завершением...`);
+    if (server.healthInterval) {
+      clearInterval(server.healthInterval);
+      console.log('  ✓ Health interval очищен');
+    }
+    if (server.keepAliveInterval) {
+      clearInterval(server.keepAliveInterval);
+      console.log('  ✓ Keep-alive interval очищен');
+    }
+    if (server.listening) {
+      server.close(() => {
+        console.log('  ✓ HTTP сервер закрыт');
+        process.exit(code);
+      });
+    } else {
+      process.exit(code);
+    }
+  };
+  
+  // Переопределяем обработчики для корректной очистки
+  process.removeAllListeners('SIGTERM');
+  process.removeAllListeners('SIGINT');
+  
+  process.on('SIGTERM', () => {
+    console.log('📥 Получен SIGTERM, завершаем работу...');
+    cleanupAndExit(0);
+  });
+  
+  process.on('SIGINT', () => {
+    console.log('📥 Получен SIGINT, завершаем работу...');
+    cleanupAndExit(0);
+  });
 });
 
 // Детальное логирование событий сервера
