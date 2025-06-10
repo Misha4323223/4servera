@@ -329,6 +329,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
   });
+
+  // Полная проверка системы
+  app.get('/api/system-health', async (req, res) => {
+    try {
+      const { SystemHealthChecker } = require('./system-health-checker');
+      const checker = new SystemHealthChecker();
+      const results = await checker.performFullHealthCheck();
+      res.json({
+        success: true,
+        ...results
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+
+  // Тестирование векторизатора endpoints
+  app.get('/api/test-vectorizer', async (req, res) => {
+    try {
+      const fetch = require('node-fetch');
+      const endpoints = [
+        'http://localhost:5006/health',
+        'http://localhost:5006/api/vectorizer/health',
+        'http://localhost:5006/api/vectorizer/formats'
+      ];
+
+      const results = {};
+      
+      for (const endpoint of endpoints) {
+        try {
+          const response = await fetch(endpoint, { timeout: 3000 });
+          const data = await response.json();
+          results[endpoint] = {
+            status: response.status,
+            ok: response.ok,
+            data: data
+          };
+        } catch (error) {
+          results[endpoint] = {
+            error: error.message,
+            accessible: false
+          };
+        }
+      }
+
+      res.json({
+        success: true,
+        vectorizerEndpoints: results,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
   
   // API для Flask-стриминга (надежный вариант)
   const flaskStreamBridge = require('./stream-flask-bridge');

@@ -17,14 +17,17 @@ externalPort = 3000
 [[ports]]
 localPort = 5004
 externalPort = 3001
-
+[[ports]]
+localPort = 5006
+externalPort = 5006
 [workflows]
 runButton = "Run"
-
 [[workflows.workflow]]
 name = "Run"
 mode = "parallel"
-
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npm run dev"
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev:vectorizer"
