@@ -684,7 +684,32 @@ async function optimizeSVGSize(svgContent, maxSize) {
 
 // Главная функция векторизации (только шелкография)
 async function advancedVectorize(imageBuffer, options = {}) {
-  return await silkscreenVectorize(imageBuffer, options);
+  try {
+    console.log(`🎯 ВЫБОР АЛГОРИТМА ВЕКТОРИЗАЦИИ`);
+    console.log(`   Качество: ${options.quality || 'standard'}`);
+    console.log(`   Тип: ${options.optimizeFor || 'web'}`);
+    
+    // Определяем нужна ли цветная векторизация
+    const needsColorVectorization = 
+      options.quality === 'silkscreen' ||
+      options.quality === 'ultra' ||
+      options.optimizeFor === 'silkscreen' ||
+      options.optimizeFor === 'print' ||
+      (options.colors && options.colors !== 'mono');
+    
+    if (needsColorVectorization) {
+      console.log(`🎨 ВЫБРАН: Цветной алгоритм createColoredSVG`);
+      return await createColoredSVG(imageBuffer, options);
+    } else {
+      console.log(`⚫ ВЫБРАН: Монохромный алгоритм silkscreenVectorize`);
+      return await silkscreenVectorize(imageBuffer, options);
+    }
+    
+  } catch (error) {
+    console.error(`❌ Ошибка выбора алгоритма:`, error);
+    // Fallback к монохромному при ошибке
+    return await silkscreenVectorize(imageBuffer, options);
+  }
 }
 
 /**
