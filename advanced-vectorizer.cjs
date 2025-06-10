@@ -582,14 +582,17 @@ async function vectorizeColorLayer(maskBuffer, color, settings) {
   const potrace = require('potrace');
   
   try {
+    // Оптимизированные параметры для шелкографии - упрощенные формы
     const potraceParams = {
       threshold: 128,
-      turdSize: settings.turdSize || 1,
+      turdSize: Math.max(10, settings.turdSize || 10), // Убираем мелкие детали (10 пикселей минимум)
       turnPolicy: settings.turnPolicy || 'black',
-      alphaMax: settings.alphaMax || 1.0,
-      optCurve: settings.optiCurve !== false,
-      optTolerance: settings.optTolerance || 0.05
+      alphaMax: Math.min(0.75, settings.alphaMax || 0.75), // Меньше углов = проще формы
+      optCurve: true, // Всегда оптимизируем кривые
+      optTolerance: Math.max(0.15, settings.optTolerance || 0.15) // Больше толерантность = меньше точек
     };
+    
+    console.log(`🎯 ЭТАП 3: Параметры векторизации для ${color.hex}:`, potraceParams);
     
     return new Promise((resolve, reject) => {
       potrace.trace(maskBuffer, potraceParams, (err, svg) => {
@@ -647,27 +650,49 @@ async function combineColorLayers(colorLayers, originalImageBuffer) {
     
     let totalPaths = 0;
     
-    // Добавляем каждый цветной слой с детальным логированием
+    // Жесткие ограничения для шелкографии
+    const MAX_PATHS_PER_LAYER = 50; // Максимум 50 путей на цвет
+    const MAX_TOTAL_PATHS = 200; // Максимум 200 путей на весь SVG
+    const MAX_SVG_SIZE_KB = 500; // Максимум 500KB
+    
+    // Добавляем каждый цветной слой с ограничениями
     colorLayers.forEach((layer, index) => {
       const layerNumber = index + 1;
       console.log(`🎨 ЭТАП 4.${layerNumber}: Добавляем слой для цвета ${layer.color}`);
       console.log(`   - Путей в слое: ${layer.paths.length}`);
-      console.log(`   - Исходное покрытие: ${layer.originalPercentage}%`);
       
       svgContent += `  <g id="color-layer-${layerNumber}" fill="${layer.color}" stroke="none">\n`;
       
       let validPaths = 0;
-      layer.paths.forEach((path, pathIndex) => {
-        if (path && path.trim() && path.length > 10) { // Фильтруем слишком короткие пути
-          svgContent += `    <path d="${path}" />\n`;
-          validPaths++;
-          totalPaths++;
+      let layerPaths = 0;
+      
+      // Сортируем пути по длине (приоритет более простым формам)
+      const sortedPaths = layer.paths
+        .filter(path => path && path.trim() && path.length > 10 && path.length < 1000)
+        .sort((a, b) => a.length - b.length);
+      
+      for (const path of sortedPaths) {
+        // Прекращаем добавление при достижении лимитов
+        if (layerPaths >= MAX_PATHS_PER_LAYER || totalPaths >= MAX_TOTAL_PATHS) {
+          console.log(`⚠️ ЭТАП 4.${layerNumber}: Достигнут лимит путей (${layerPaths}/${MAX_PATHS_PER_LAYER} на слой, ${totalPaths}/${MAX_TOTAL_PATHS} всего)`);
+          break;
         }
-      });
+        
+        svgContent += `    <path d="${path}" />\n`;
+        validPaths++;
+        layerPaths++;
+        totalPaths++;
+        
+        // Проверяем размер SVG
+        if (svgContent.length > MAX_SVG_SIZE_KB * 1024) {
+          console.log(`⚠️ ЭТАП 4.${layerNumber}: Достигнут лимит размера (${(svgContent.length / 1024).toFixed(1)}KB)`);
+          break;
+        }
+      }
       
       svgContent += `  </g>\n`;
       
-      console.log(`✅ ЭТАП 4.${layerNumber}: Добавлено ${validPaths} валидных путей для ${layer.color}`);
+      console.log(`✅ ЭТАП 4.${layerNumber}: Добавлено ${validPaths} из ${layer.paths.length} путей для ${layer.color}`);
     });
     
     svgContent += `</svg>`;
@@ -682,11 +707,73 @@ async function combineColorLayers(colorLayers, originalImageBuffer) {
       return createMonochromeBackup(originalImageBuffer, { threshold: 128 });
     }
     
+    // Финальная проверка размера для шелкографии
+    const finalSizeKB = svgContent.length / 1024;
+    if (finalSizeKB > MAX_SVG_SIZE_KB) {
+      console.log(`⚠️ ЭТАП 4: SVG слишком большой (${finalSizeKB.toFixed(1)}KB > ${MAX_SVG_SIZE_KB}KB), применяем экстренную оптимизацию`);
+      return await applyEmergencyOptimization(svgContent, originalImageBuffer, MAX_SVG_SIZE_KB);
+    }
+    
+    // Проверка на корректность для веб-отображения
+    if (totalPaths > MAX_TOTAL_PATHS * 2) {
+      console.log(`⚠️ ЭТАП 4: Слишком много путей (${totalPaths}), может быть проблема с отображением`);
+    }
+    
     console.log(`✅ ЭТАП 4 ЗАВЕРШЕН: Многослойный SVG создан успешно`);
     return svgContent;
     
   } catch (error) {
     console.error('❌ ЭТАП 4 ОШИБКА - Объединение слоев:', error);
+    return createMonochromeBackup(originalImageBuffer, { threshold: 128 });
+  }
+}
+
+/**
+ * Экстренная оптимизация для слишком больших SVG файлов
+ */
+async function applyEmergencyOptimization(svgContent, originalImageBuffer, maxSizeKB) {
+  console.log('🚨 ЭКСТРЕННАЯ ОПТИМИЗАЦИЯ: Упрощение SVG для шелкографии');
+  
+  try {
+    // Извлекаем все пути из SVG
+    const pathRegex = /<path[^>]*d="([^"]*)"[^>]*>/g;
+    const paths = [];
+    let match;
+    
+    while ((match = pathRegex.exec(svgContent)) !== null) {
+      paths.push(match[1]);
+    }
+    
+    console.log(`🔍 Найдено ${paths.length} путей, требуется радикальное упрощение`);
+    
+    // Берем только самые простые пути (до 50 штук)
+    const simplifiedPaths = paths
+      .filter(path => path.length < 500) // Только короткие пути
+      .slice(0, 50); // Максимум 50 путей
+    
+    // Создаем упрощенный SVG
+    const sharp = require('sharp');
+    const metadata = await sharp(originalImageBuffer).metadata();
+    
+    let optimizedSVG = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${metadata.width}" height="${metadata.height}" viewBox="0 0 ${metadata.width} ${metadata.height}" xmlns="http://www.w3.org/2000/svg">
+  <title>Упрощенная шелкография</title>
+  <desc>Экстренно оптимизированная версия для веб-отображения</desc>
+  <g id="simplified-layer" fill="#000000" stroke="none">
+`;
+    
+    simplifiedPaths.forEach(path => {
+      optimizedSVG += `    <path d="${path}" />\n`;
+    });
+    
+    optimizedSVG += `  </g>
+</svg>`;
+    
+    console.log(`✅ ЭКСТРЕННАЯ ОПТИМИЗАЦИЯ ЗАВЕРШЕНА: ${simplifiedPaths.length} путей, ${(optimizedSVG.length / 1024).toFixed(1)}KB`);
+    return optimizedSVG;
+    
+  } catch (error) {
+    console.error('❌ Ошибка экстренной оптимизации:', error);
     return createMonochromeBackup(originalImageBuffer, { threshold: 128 });
   }
 }
