@@ -360,63 +360,6 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 
   console.log('✅ Векторизатор полностью инициализирован и готов к работе');
 });
-
-// Глубокое отслеживание событий HTTP сервера
-const serverEvents = ['error', 'close', 'connection', 'listening', 'request', 'upgrade', 'connect'];
-
-serverEvents.forEach(eventName => {
-  server.on(eventName, (...args) => {
-    logSystemState(`server-${eventName}`);
-    detailedLog(`🌐 SERVER EVENT: ${eventName}`, 'SERVER');
-    
-    if (eventName === 'error') {
-      const error = args[0];
-      logError('❌ CRITICAL SERVER ERROR', error);
-      logSystemState('server-error');
-      
-      if (error.code === 'EADDRINUSE') {
-        detailedLog(`   PORT ${PORT} already in use by another process`, 'SERVER');
-      } else if (error.code === 'EACCES') {
-        detailedLog(`   Access denied to port ${PORT}`, 'SERVER');
-      }
-    }
-    
-    if (eventName === 'close') {
-      detailedLog(`🛑 SERVER CLOSED at ${new Date().toISOString()}`, 'SERVER');
-      logSystemState('server-close');
-      if (server.healthInterval) {
-        clearInterval(server.healthInterval);
-        detailedLog('🧹 Health interval cleared', 'SERVER');
-      }
-      if (server.keepAliveInterval) {
-        clearInterval(server.keepAliveInterval);
-        detailedLog('🧹 Keep-alive interval cleared', 'SERVER');
-      }
-    }
-    
-    if (eventName === 'listening') {
-      detailedLog(`✅ SERVER LISTENING on port ${PORT}`, 'SERVER');
-      logSystemState('server-listening');
-    }
-    
-    if (eventName === 'connection') {
-      const socket = args[0];
-      detailedLog(`🔗 NEW CONNECTION established`, 'NETWORK');
-    }
-  });
-});
-
-
-
-  // Предотвращаем автоматическое завершение процесса
-  console.log('🔒 Процесс зафиксирован для работы сервера');
-  
-  // Дополнительный keep-alive уже есть в keepAliveIntervals
-  
-
-  
-  // Сервер запущен, процесс будет работать бесконечно
-  console.log('✅ Векторизатор полностью инициализирован и готов к работе');
 }
 
 // Простой запуск сервера
