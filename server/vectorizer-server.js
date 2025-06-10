@@ -49,6 +49,54 @@ function logError(message, error = null) {
   }
 }
 
+// Добавляем обработчики всех критических событий процесса
+function setupProcessEventHandlers() {
+  detailedLog('🔧 Настройка обработчиков критических событий процесса...');
+  
+  process.on('uncaughtException', (error) => {
+    logError('🚨 КРИТИЧЕСКАЯ ОШИБКА: Необработанное исключение', error);
+    logError('🔍 Process exit с кодом 1 из-за uncaughtException');
+    process.exit(1);
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    logError('🚨 КРИТИЧЕСКАЯ ОШИБКА: Необработанное отклонение Promise', reason);
+    logError(`🔍 Promise: ${promise}`);
+    logError('🔍 Process exit с кодом 1 из-за unhandledRejection');
+    process.exit(1);
+  });
+
+  process.on('beforeExit', (code) => {
+    detailedLog(`🚨 Process beforeExit event с кодом: ${code}`);
+  });
+
+  process.on('exit', (code) => {
+    detailedLog(`🚨 Process exit event с кодом: ${code}`);
+  });
+
+  process.on('SIGTERM', () => {
+    detailedLog('🚨 Получен сигнал SIGTERM');
+    detailedLog('🔍 Graceful shutdown...');
+    process.exit(0);
+  });
+
+  process.on('SIGINT', () => {
+    detailedLog('🚨 Получен сигнал SIGINT (Ctrl+C)');
+    detailedLog('🔍 Graceful shutdown...');
+    process.exit(0);
+  });
+
+  process.on('SIGHUP', () => {
+    detailedLog('🚨 Получен сигнал SIGHUP');
+  });
+
+  process.on('warning', (warning) => {
+    logError('⚠️ Node.js предупреждение', warning);
+  });
+
+  detailedLog('✅ Все обработчики событий процесса установлены');
+}
+
 // Глубокая диагностика системы
 function logSystemState(reason = 'periodic') {
   const timestamp = new Date().toISOString();
@@ -105,48 +153,89 @@ async function startVectorizerServer() {
   detailedLog(`  ✓ Порт: ${PORT}`);
   detailedLog('  ✓ __dirname: ' + __dirname);
 
-  // Детальное логирование всех событий процесса
-  detailedLog('📝 Настройка обработчиков событий процесса...');
+  // Настройка детального логирования критических событий
+  setupProcessEventHandlers();
   logSystemState('startup');
-  
-  // Минимальные обработчики критических событий (без дублирования)
-  process.once('uncaughtException', (error) => {
-    console.error('❌ FATAL: uncaughtException:', error.message);
+
+  // Создание Express приложения с детальным логированием
+  detailedLog('🔧 Создание Express приложения...');
+  let app;
+  try {
+    app = express();
+    detailedLog('  ✅ Express приложение создано успешно');
+  } catch (error) {
+    logError('❌ ОШИБКА создания Express приложения', error);
     process.exit(1);
-  });
-  
-  process.once('unhandledRejection', (reason, promise) => {
-    console.error('❌ FATAL: unhandledRejection:', reason);
+  }
+
+  // Настройка CORS с детальным логированием
+  detailedLog('🔧 Настройка CORS middleware...');
+  try {
+    app.use(cors({
+      origin: ['http://localhost:3001', 'http://localhost:5000', 'http://localhost:3000', /\.replit\.app$/],
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+    }));
+    detailedLog('  ✅ CORS middleware настроен успешно');
+  } catch (error) {
+    logError('❌ ОШИБКА настройки CORS', error);
     process.exit(1);
-  });
+  }
 
-  // Создание Express приложения
-  const app = express();
+  // Настройка middleware с детальным логированием
+  detailedLog('🔧 Настройка middleware для парсинга данных...');
+  try {
+    app.use(express.json({ limit: '50mb' }));
+    detailedLog('  ✅ JSON middleware настроен (лимит: 50mb)');
+    
+    app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+    detailedLog('  ✅ URL-encoded middleware настроен (лимит: 50mb)');
+  } catch (error) {
+    logError('❌ ОШИБКА настройки middleware', error);
+    process.exit(1);
+  }
 
-  // Настройка CORS для кросс-доменных запросов
-  app.use(cors({
-  origin: ['http://localhost:3001', 'http://localhost:5000', 'http://localhost:3000', /\.replit\.app$/],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-}));
+  // Статическая раздача с детальным логированием
+  detailedLog('🔧 Настройка статической раздачи файлов...');
+  try {
+    const outputPath = path.join(__dirname, '..', 'output');
+    app.use('/output', express.static(outputPath));
+    detailedLog(`  ✅ Статическая раздача настроена: ${outputPath}`);
+  } catch (error) {
+    logError('❌ ОШИБКА настройки статической раздачи', error);
+    process.exit(1);
+  }
 
-// Middleware для парсинга JSON и URL-encoded данных
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+  // Middleware для логирования запросов с детальным отслеживанием
+  detailedLog('🔧 Настройка middleware для логирования запросов...');
+  try {
+    app.use((req, res, next) => {
+      const timestamp = new Date().toISOString();
+      detailedLog(`[REQUEST] ${req.method} ${req.path} - ${req.ip || 'unknown'}`);
+      
+      // Логируем завершение запроса
+      res.on('finish', () => {
+        detailedLog(`[RESPONSE] ${req.method} ${req.path} - ${res.statusCode}`);
+      });
+      
+      next();
+    });
+    detailedLog('  ✅ Request logging middleware настроен');
+  } catch (error) {
+    logError('❌ ОШИБКА настройки request logging middleware', error);
+    process.exit(1);
+  }
 
-// Статическая раздача выходных файлов векторизатора
-app.use('/output', express.static(path.join(__dirname, '..', 'output')));
-
-// Логирование запросов (единое middleware)
-app.use((req, res, next) => {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${req.method} ${req.path} - Vectorizer Server`);
-  next();
-});
-
-// Подключаем маршруты векторизатора
-app.use('/api/vectorizer', vectorizerRoutes);
+  // Подключение маршрутов векторизатора с детальным логированием
+  detailedLog('🔧 Подключение маршрутов векторизатора...');
+  try {
+    app.use('/api/vectorizer', vectorizerRoutes);
+    detailedLog('  ✅ Маршруты векторизатора подключены к /api/vectorizer');
+  } catch (error) {
+    logError('❌ ОШИБКА подключения маршрутов векторизатора', error);
+    process.exit(1);
+  }
 
 // Healthcheck endpoint
 app.get('/health', (req, res) => {
@@ -205,14 +294,48 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Запуск сервера с детальным логированием
-console.log(`🚀 Попытка запуска сервера на порту ${PORT}...`);
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🎨 Vectorizer Server запущен на порту ${PORT}`);
-  console.log(`📍 API доступен по адресу: http://localhost:${PORT}/api/vectorizer`);
-  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
-  console.log(`📁 Output files: http://localhost:${PORT}/output`);
-  console.log(`⏰ Время запуска: ${new Date().toISOString()}`);
+  // Запуск сервера с максимально детальным логированием
+  detailedLog(`🚀 Попытка запуска сервера на порту ${PORT}...`);
+  
+  let server;
+  try {
+    server = app.listen(PORT, '0.0.0.0', () => {
+      detailedLog(`✅ Сервер успешно запущен на порту ${PORT}`);
+      detailedLog(`📍 API доступен по адресу: http://localhost:${PORT}/api/vectorizer`);
+      detailedLog(`🏥 Health check: http://localhost:${PORT}/health`);
+      detailedLog(`📁 Output files: http://localhost:${PORT}/output`);
+      detailedLog(`⏰ Время запуска: ${new Date().toISOString()}`);
+      detailedLog(`✅ Векторизатор полностью инициализирован и готов к работе`);
+      
+      // Логируем состояние после успешного запуска
+      logSystemState('after_startup');
+    });
+    
+    // Обработчик ошибок сервера
+    server.on('error', (error) => {
+      logError('🚨 КРИТИЧЕСКАЯ ОШИБКА СЕРВЕРА', error);
+      if (error.code === 'EADDRINUSE') {
+        logError(`❌ Порт ${PORT} уже используется другим процессом`);
+      } else if (error.code === 'EACCES') {
+        logError(`❌ Нет прав доступа к порту ${PORT}`);
+      }
+      process.exit(1);
+    });
+    
+    // Обработчик закрытия сервера
+    server.on('close', () => {
+      detailedLog('🚨 Сервер закрыт');
+    });
+    
+  } catch (error) {
+    logError('🚨 КРИТИЧЕСКАЯ ОШИБКА при запуске сервера', error);
+    process.exit(1);
+  }
+
+  // Периодическое логирование состояния для отслеживания стабильности
+  setInterval(() => {
+    logSystemState('health_check');
+  }, 15000); // Каждые 15 секунд
   
   // Упрощенная проверка состояния без избыточного логирования
   const healthInterval = setInterval(() => {
