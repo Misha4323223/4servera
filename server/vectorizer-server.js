@@ -12,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Асинхронная функция запуска сервера
-function startVectorizerServer() {
+async function startVectorizerServer() {
   // Импортируем готовые маршруты векторизатора с обработкой ошибок
   let vectorizerRoutes;
   try {
@@ -366,25 +366,17 @@ server.on('connection', (socket) => {
     }, 1000);
   });
   
-  // Возвращаем объект для предотвращения завершения async функции
-  return new Promise((resolve, reject) => {
-    server.on('close', () => {
-      console.log('🛑 Server closed, resolving promise');
-      clearInterval(keepAlive);
-      resolve();
-    });
-    
-    server.on('error', (error) => {
-      console.error('❌ Server error, rejecting promise:', error);
-      clearInterval(keepAlive);
-      reject(error);
-    });
-  });
+  // Сервер запущен, процесс будет работать бесконечно
+  console.log('✅ Векторизатор полностью инициализирован и готов к работе');
 }
 
-// Запуск сервера с обработкой ошибок
-startVectorizerServer().catch((error) => {
-  console.error('❌ Критическая ошибка при запуске векторизатора:', error);
-  console.error('Stack:', error.stack);
-  process.exit(1);
-});
+// Запуск сервера с await
+(async () => {
+  try {
+    await startVectorizerServer();
+  } catch (error) {
+    console.error('❌ Критическая ошибка при запуске векторизатора:', error);
+    console.error('Stack:', error.stack);
+    process.exit(1);
+  }
+})();
