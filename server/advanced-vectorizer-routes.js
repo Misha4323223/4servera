@@ -3,11 +3,18 @@
  * REST API endpoints для векторизации изображений
  */
 
-const express = require('express');
+import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs/promises';
+import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+
 const router = express.Router();
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs').promises;
 const advancedVectorizer = require('../advanced-vectorizer.cjs');
 
 // Middleware для логирования запросов векторизатора

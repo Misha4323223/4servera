@@ -3,12 +3,16 @@
  * Работает на порту 5006, изолированно от основного приложения
  */
 
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
+import express from 'express';
+import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Импортируем готовые маршруты векторизатора
-const vectorizerRoutes = require('./advanced-vectorizer-routes.js');
+import vectorizerRoutes from './advanced-vectorizer-routes.js';
 
 const app = express();
 const PORT = process.env.VECTORIZER_PORT || 5006;
