@@ -103,10 +103,10 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
     
     // Обработка прямого запроса к векторизатору на порту 5006
     if (isDirectVectorizerRequest) {
-      let imageUrl = options.imageUrl;
+      let imageUrl = null;
       
-      // Если нет прямой ссылки на изображение, ищем последнее сгенерированное изображение в сессии
-      if (!imageUrl && options.sessionId) {
+      // Всегда ищем последнее сгенерированное изображение в сессии
+      if (options.sessionId) {
         try {
           const sessionContext = await chatMemory.getSessionContext(options.sessionId, 10);
           const lastImageMatch = sessionContext.context.match(/https:\/\/image\.pollinations\.ai\/prompt\/[^\s\)]+/);
@@ -124,34 +124,22 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
         
         try {
           const fetch = require('node-fetch');
-          const FormData = require('form-data');
-          const fs = require('fs');
-          const path = require('path');
           
-          let imageStream;
+          SmartLogger.route(`🌐 Отправляем URL напрямую на векторизатор: ${imageUrl.substring(0, 100)}...`);
           
-          // Если это URL (из pollinations.ai), скачиваем изображение
-          if (imageUrl.startsWith('http')) {
-            SmartLogger.route(`📥 Скачиваем изображение с URL: ${imageUrl.substring(0, 100)}...`);
-            const imageResponse = await fetch(imageUrl);
-            if (!imageResponse.ok) {
-              throw new Error(`Не удалось скачать изображение: ${imageResponse.status}`);
-            }
-            imageStream = imageResponse.body;
-          } else {
-            // Если это локальный файл
-            imageStream = fs.createReadStream(imageUrl);
-          }
-          
-          // Подготавливаем данные для отправки на векторизатор
-          const form = new FormData();
-          form.append('image', imageStream);
-          form.append('quality', 'simple');
-          form.append('outputFormat', 'svg');
+          // Подготавливаем JSON данные для отправки на /convert-url
+          const requestData = {
+            imageUrl: imageUrl,
+            quality: 'simple',
+            outputFormat: 'svg'
+          };
         
-        const response = await fetch('http://localhost:5006/api/vectorizer/convert', {
+        const response = await fetch('http://localhost:5006/api/vectorizer/convert-url', {
           method: 'POST',
-          body: form,
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestData),
           timeout: 30000
         });
         
@@ -177,7 +165,11 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
               vectorUrl: `/output/vectorizer/${result.result.filename}`,
               svgContent: result.result.svgContent
             };
+          } else {
+            throw new Error(result.error || 'Векторизация не удалась');
           }
+        } else {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
       } catch (error) {
         SmartLogger.error(`Ошибка прямого обращения к векторизатору 5006:`, error);
@@ -186,6 +178,14 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
           response: `❌ Ошибка векторизатора на порту 5006: ${error.message}`,
           provider: 'Vectorizer-5006',
           error: error.message
+        };
+      } else {
+        // Изображение не найдено в истории сессии
+        return {
+          success: false,
+          response: `❌ Не найдено изображение в истории чата для векторизации.\n\nСначала сгенерируйте изображение, а затем используйте команду "нужен вектор".`,
+          provider: 'Vectorizer-5006',
+          error: 'No image found in session history'
         };
       }
     }
