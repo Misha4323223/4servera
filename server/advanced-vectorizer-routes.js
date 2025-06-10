@@ -17,6 +17,14 @@ const require = createRequire(import.meta.url);
 const router = express.Router();
 
 console.log('🔍 Загрузка advanced-vectorizer.cjs...');
+
+// Принудительная очистка кэша для применения исправлений
+const vectorizerPath = require.resolve('../advanced-vectorizer.cjs');
+if (require.cache[vectorizerPath]) {
+  delete require.cache[vectorizerPath];
+  console.log('🔄 Очищен кэш advanced-vectorizer.cjs в routes');
+}
+
 let advancedVectorizer;
 try {
   advancedVectorizer = require('../advanced-vectorizer.cjs');

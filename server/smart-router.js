@@ -30,7 +30,15 @@ const SmartLogger = {
 
 // Импортируем провайдеры
 const chatFreeProvider = require('./chatfree-provider');
+
+// Принудительная очистка кэша для применения исправлений векторизатора
+const vectorizerPath = require.resolve('../advanced-vectorizer.cjs');
+if (require.cache[vectorizerPath]) {
+  delete require.cache[vectorizerPath];
+  console.log('🔄 Очищен кэш advanced-vectorizer.cjs для применения исправлений');
+}
 const advancedVectorizer = require('../advanced-vectorizer.cjs');
+
 const vectorizerManager = require('./vectorizer-manager');
 const printOptimizer = require('./print-optimizer');
 const deepspeekProvider = require('./deepspeek-provider');
