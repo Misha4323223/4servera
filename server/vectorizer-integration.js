@@ -5,14 +5,14 @@
 
 import fetch from 'node-fetch';
 
-const VECTORIZER_BASE_URL = 'http://localhost:3001/api/vectorizer';
+const VECTORIZER_BASE_URL = 'http://localhost:3005/api/vectorizer';
 
 /**
  * Проверяет доступность векторизатора
  */
 async function checkVectorizerHealth() {
   try {
-    const response = await fetch('http://localhost:3001/health');
+    const response = await fetch('http://localhost:3005/health');
     return response.ok;
   } catch (error) {
     console.error('Векторизатор недоступен:', error.message);

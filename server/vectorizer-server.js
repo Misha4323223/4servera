@@ -13,7 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Определяем порт для векторизатора
-const PORT = process.env.VECTORIZER_PORT || 3001;
+const PORT = process.env.VECTORIZER_PORT || 3005;
 
 // Настройка детального логирования в файл
 const logFile = '/tmp/vectorizer-detailed.log';
