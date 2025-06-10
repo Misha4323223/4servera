@@ -698,7 +698,7 @@ async function advancedVectorize(imageBuffer, options = {}) {
       (options.colors && options.colors !== 'mono');
     
     if (needsColorVectorization) {
-      console.log(`🎨 ВЫБРАН: Цветной алгоритм createSilkscreenSVG`);
+      console.log(`🎨 ВЫБРАН: Цветной алгоритм silkscreenVectorize`);
       return await silkscreenVectorize(imageBuffer, options);
     } else {
       console.log(`⚫ ВЫБРАН: Монохромный алгоритм createRealSVG`);
@@ -1224,8 +1224,8 @@ async function vectorizeImage(imageBuffer, originalName = 'image', options = {})
     console.log(`🎨 Продвинутая векторизация: ${originalName}`);
     console.log(`📊 Качество: ${quality}, Формат: ${outputFormat}`);
     
-    // Используем продвинутый алгоритм векторизации
-    const vectorResult = await advancedVectorize(imageBuffer, options);
+    // Используем прямой вызов для избежания рекурсии
+    const vectorResult = await silkscreenVectorize(imageBuffer, options);
     
     if (!vectorResult.success) {
       throw new Error('Ошибка векторизации');
@@ -1270,7 +1270,7 @@ async function generatePreviews(imageBuffer, originalName = 'image') {
   
   for (const quality of qualities) {
     try {
-      const result = await advancedVectorize(imageBuffer, { quality });
+      const result = await silkscreenVectorize(imageBuffer, { quality });
       if (result.success) {
         previews.push({
           quality,
@@ -1407,7 +1407,7 @@ async function multiFormatVectorize(imageBuffer, originalName = 'image', options
     console.log(`📁 Форматы: ${formats.join(', ')}`);
     
     // Сначала получаем SVG
-    const vectorResult = await advancedVectorize(imageBuffer, { ...options, outputFormat: 'svg' });
+    const vectorResult = await silkscreenVectorize(imageBuffer, { ...options, outputFormat: 'svg' });
     
     if (!vectorResult.success) {
       throw new Error('Ошибка базовой векторизации');
