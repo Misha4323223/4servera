@@ -3,123 +3,40 @@
  * Поддерживает множественные алгоритмы, качественные настройки и AI-оптимизацию
  */
 
-const sharp = require('sharp');
-const potrace = require('potrace');
+// Убираем тяжелые зависимости для уменьшения Event Loop блокировки
 const path = require('path');
 const fs = require('fs').promises;
 const crypto = require('crypto');
 
-// Уровни качества векторизации
+// Упрощенные настройки качества - только базовые опции
 const QUALITY_PRESETS = {
-  draft: {
-    name: 'Черновик',
-    description: 'Быстрая векторизация для предварительного просмотра',
+  simple: {
+    name: 'Простая',
+    description: 'Базовая векторизация с 5 цветами',
     settings: {
-      maxSize: 400,
-      threshold: 140,
-      optTolerance: 1.0,
-      turdSize: 150,
-      alphaMax: 0.8,
-      optCurve: false
-    }
-  },
-  standard: {
-    name: 'Стандарт',
-    description: 'Сбалансированное качество и скорость',
-    settings: {
-      maxSize: 800,
-      threshold: 128,
-      optTolerance: 0.4,
-      turdSize: 100,
-      alphaMax: 1.0,
-      optCurve: true
-    }
-  },
-  premium: {
-    name: 'Премиум',
-    description: 'Высокое качество для профессионального использования',
-    settings: {
-      maxSize: 1200,
-      threshold: 120,
-      optTolerance: 0.2,
-      turdSize: 50,
-      alphaMax: 1.3,
-      optCurve: true
-    }
-  },
-  ultra: {
-    name: 'Ультра',
-    description: 'Максимальное качество для печати и презентаций',
-    settings: {
-      maxSize: 1600,
-      threshold: 115,
-      optTolerance: 0.1,
-      turdSize: 25,
-      alphaMax: 1.5,
-      optCurve: true
+      maxSize: 300,
+      maxColors: 5,
+      threshold: 128
     }
   }
 };
 
-// Типы выходных форматов
+// Только SVG формат для упрощения
 const OUTPUT_FORMATS = {
   svg: {
     extension: '.svg',
     mimeType: 'image/svg+xml',
     description: 'Масштабируемая векторная графика'
-  },
-  eps: {
-    extension: '.eps',
-    mimeType: 'application/postscript',
-    description: 'Encapsulated PostScript (печать)'
-  },
-  pdf: {
-    extension: '.pdf',
-    mimeType: 'application/pdf',
-    description: 'Векторный PDF документ'
   }
 };
 
-// Типы контента для автоматической оптимизации
+// Упрощенный тип контента - все одинаково
 const CONTENT_TYPES = {
-  logo: {
-    name: 'Логотип',
+  simple: {
+    name: 'Простой',
     optimizations: {
-      threshold: 130,
-      optTolerance: 0.3,
-      turdSize: 75,
-      colorReduction: true,
-      maxColors: 4
-    }
-  },
-  photo: {
-    name: 'Фотография',
-    optimizations: {
-      threshold: 120,
-      optTolerance: 0.2,
-      turdSize: 40,
-      colorReduction: false,
-      maxColors: 12
-    }
-  },
-  artwork: {
-    name: 'Художественная работа',
-    optimizations: {
-      threshold: 125,
-      optTolerance: 0.15,
-      turdSize: 30,
-      colorReduction: false,
-      maxColors: 8
-    }
-  },
-  text: {
-    name: 'Текст/Схема',
-    optimizations: {
-      threshold: 140,
-      optTolerance: 0.5,
-      turdSize: 100,
-      colorReduction: true,
-      maxColors: 2
+      threshold: 128,
+      maxColors: 5
     }
   }
 };
