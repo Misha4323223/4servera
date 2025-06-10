@@ -102,19 +102,52 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
     const isDirectVectorizerRequest = directVectorizerKeywords.some(keyword => queryLowerForSvg.includes(keyword));
     
     // Обработка прямого запроса к векторизатору на порту 5006
-    if (isDirectVectorizerRequest && options.imageUrl) {
-      SmartLogger.route(`🎯 ПРЯМОЙ ЗАПРОС К ВЕКТОРИЗАТОРУ 5006`);
+    if (isDirectVectorizerRequest) {
+      let imageUrl = options.imageUrl;
       
-      try {
-        const fetch = require('node-fetch');
-        const FormData = require('form-data');
-        const fs = require('fs');
+      // Если нет прямой ссылки на изображение, ищем последнее сгенерированное изображение в сессии
+      if (!imageUrl && options.sessionId) {
+        try {
+          const sessionContext = await chatMemory.getSessionContext(options.sessionId, 10);
+          const lastImageMatch = sessionContext.context.match(/https:\/\/image\.pollinations\.ai\/prompt\/[^\s\)]+/);
+          if (lastImageMatch) {
+            imageUrl = lastImageMatch[0];
+            SmartLogger.route(`🔍 Найдено последнее изображение в сессии: ${imageUrl.substring(0, 100)}...`);
+          }
+        } catch (error) {
+          SmartLogger.error(`Ошибка поиска изображения в сессии:`, error);
+        }
+      }
+      
+      if (imageUrl) {
+        SmartLogger.route(`🎯 ПРЯМОЙ ЗАПРОС К ВЕКТОРИЗАТОРУ 5006`);
         
-        // Подготавливаем данные для отправки на векторизатор
-        const form = new FormData();
-        form.append('image', fs.createReadStream(options.imageUrl));
-        form.append('quality', 'simple');
-        form.append('outputFormat', 'svg');
+        try {
+          const fetch = require('node-fetch');
+          const FormData = require('form-data');
+          const fs = require('fs');
+          const path = require('path');
+          
+          let imageStream;
+          
+          // Если это URL (из pollinations.ai), скачиваем изображение
+          if (imageUrl.startsWith('http')) {
+            SmartLogger.route(`📥 Скачиваем изображение с URL: ${imageUrl.substring(0, 100)}...`);
+            const imageResponse = await fetch(imageUrl);
+            if (!imageResponse.ok) {
+              throw new Error(`Не удалось скачать изображение: ${imageResponse.status}`);
+            }
+            imageStream = imageResponse.body;
+          } else {
+            // Если это локальный файл
+            imageStream = fs.createReadStream(imageUrl);
+          }
+          
+          // Подготавливаем данные для отправки на векторизатор
+          const form = new FormData();
+          form.append('image', imageStream);
+          form.append('quality', 'simple');
+          form.append('outputFormat', 'svg');
         
         const response = await fetch('http://localhost:5006/api/vectorizer/convert', {
           method: 'POST',
