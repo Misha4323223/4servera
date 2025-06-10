@@ -391,9 +391,9 @@ function pointToLineDistance(point, lineStart, lineEnd) {
  * Получает настройки potrace в зависимости от качества
  */
 function getPotraceOptions(quality) {
-  // Базовые настройки, которые точно работают с potrace
+  // Правильные настройки для potrace - threshold должен быть числом 0-255
   const baseOptions = {
-    threshold: 'auto',
+    threshold: 128,
     optTolerance: 0.2,
     turdSize: 2
   };
@@ -401,23 +401,20 @@ function getPotraceOptions(quality) {
   switch (quality) {
     case 'ultra':
       return {
-        ...baseOptions,
-        threshold: 'auto',
+        threshold: 120,
         turdSize: 2,
         optTolerance: 0.2
       };
     case 'high':
       return {
-        ...baseOptions,
-        threshold: 'auto',
+        threshold: 128,
         turdSize: 4,
         optTolerance: 0.4
       };
     case 'standard':
     default:
       return {
-        ...baseOptions,
-        threshold: 'auto',
+        threshold: 140,
         turdSize: 10,
         optTolerance: 0.6
       };
