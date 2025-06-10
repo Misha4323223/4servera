@@ -29,25 +29,25 @@ async function startVectorizerServer() {
   const app = express();
   const PORT = process.env.VECTORIZER_PORT || 5006;
 
-// Детальное логирование для диагностики
-console.log('🔍 Диагностика запуска векторизатора:');
-console.log('  ✓ Express импортирован');
-console.log('  ✓ CORS импортирован');
-console.log(`  ✓ Порт: ${PORT}`);
-console.log('  ✓ __dirname:',  __dirname);
+  // Детальное логирование для диагностики
+  console.log('🔍 Диагностика запуска векторизатора:');
+  console.log('  ✓ Express импортирован');
+  console.log('  ✓ CORS импортирован');
+  console.log(`  ✓ Порт: ${PORT}`);
+  console.log('  ✓ __dirname:',  __dirname);
 
-// Перехват всех ошибок процесса
-process.on('uncaughtException', (error) => {
-  console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - uncaughtException:', error);
-  console.error('Stack trace:', error.stack);
-  process.exit(1);
-});
+  // Перехват всех ошибок процесса
+  process.on('uncaughtException', (error) => {
+    console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - uncaughtException:', error);
+    console.error('Stack trace:', error.stack);
+    process.exit(1);
+  });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - unhandledRejection:', reason);
-  console.error('Promise:', promise);
-  process.exit(1);
-});
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ КРИТИЧЕСКАЯ ОШИБКА - unhandledRejection:', reason);
+    console.error('Promise:', promise);
+    process.exit(1);
+  });
 
 // Настройка CORS для кросс-доменных запросов
 app.use(cors({
@@ -139,13 +139,21 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📁 Output files: http://localhost:${PORT}/output`);
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('🛑 Vectorizer Server получил SIGTERM, завершение...');
-  process.exit(0);
-});
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('🛑 Vectorizer Server получил SIGTERM, завершение...');
+    process.exit(0);
+  });
 
-process.on('SIGINT', () => {
-  console.log('🛑 Vectorizer Server получил SIGINT, завершение...');
-  process.exit(0);
+  process.on('SIGINT', () => {
+    console.log('🛑 Vectorizer Server получил SIGINT, завершение...');
+    process.exit(0);
+  });
+}
+
+// Запуск сервера с обработкой ошибок
+startVectorizerServer().catch((error) => {
+  console.error('❌ Критическая ошибка при запуске векторизатора:', error);
+  console.error('Stack:', error.stack);
+  process.exit(1);
 });
