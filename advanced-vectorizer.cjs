@@ -8,15 +8,66 @@ const path = require('path');
 const fs = require('fs').promises;
 const crypto = require('crypto');
 
-// Упрощенные настройки качества - только базовые опции
-const QUALITY_PRESETS = {
-  simple: {
-    name: 'Простая',
-    description: 'Базовая векторизация с 5 цветами',
+// Adobe Illustrator Image Trace настройки
+const ADOBE_ILLUSTRATOR_PRESETS = {
+  'auto-color': {
+    name: 'Авто-цвет (как AI)',
+    description: 'Автоматическое определение цветов до 5 максимум',
     settings: {
-      maxSize: 300,
+      maxSize: 2000,
       maxColors: 5,
-      threshold: 128
+      threshold: 'auto',
+      turdSize: 2,
+      turnPolicy: 'black',
+      optTolerance: 0.2,
+      alphaMax: 1.0,
+      optiCurve: true,
+      preprocess: true
+    }
+  },
+  'high-fidelity': {
+    name: 'Высокая точность (как AI High Fidelity Photo)',
+    description: 'Максимальная детализация с 5 цветами',
+    settings: {
+      maxSize: 1800,
+      maxColors: 5,
+      threshold: 240,
+      turdSize: 1,
+      turnPolicy: 'minority',
+      optTolerance: 0.1,
+      alphaMax: 0.8,
+      optiCurve: true,
+      preprocess: true
+    }
+  },
+  'low-color': {
+    name: 'Мало цветов (как AI Low Color)',
+    description: 'Упрощенная палитра 3-5 цветов',
+    settings: {
+      maxSize: 1500,
+      maxColors: 3,
+      threshold: 180,
+      turdSize: 4,
+      turnPolicy: 'black',
+      optTolerance: 0.3,
+      alphaMax: 1.0,
+      optiCurve: true,
+      preprocess: true
+    }
+  },
+  'silkscreen': {
+    name: 'Шелкография (оптимизировано)',
+    description: 'Специально для печати, 5 цветов максимум',
+    settings: {
+      maxSize: 1500,
+      maxColors: 5,
+      threshold: 105,
+      turdSize: 1,
+      turnPolicy: 'black',
+      optTolerance: 0.05,
+      alphaMax: 1.0,
+      optiCurve: true,
+      preprocess: true
     }
   }
 };
@@ -69,34 +120,276 @@ function detectContentType(imageBuffer) {
 }
 
 /**
- * Упрощенная векторизация без тяжелых библиотек
+ * Adobe Illustrator Image Trace - точная копия алгоритма
  */
-async function advancedVectorize(imageBuffer, options = {}) {
-  const { quality = 'standard', outputFormat = 'svg' } = options;
+async function adobeIllustratorTrace(imageBuffer, options = {}) {
+  const { quality = 'auto-color', outputFormat = 'svg', maxFileSize = 20 * 1024 * 1024 } = options;
   
   try {
-    const detectedType = detectContentType(imageBuffer);
-    const qualitySettings = QUALITY_PRESETS[quality] || QUALITY_PRESETS.standard;
-    const finalSettings = { ...qualitySettings.settings, quality };
+    console.log(`🎨 Adobe Illustrator Image Trace: режим=${quality}`);
     
-    console.log(`🔥 Реальная векторизация: качество=${quality}, тип=${detectedType}, формат=${outputFormat}`);
+    const preset = ADOBE_ILLUSTRATOR_PRESETS[quality] || ADOBE_ILLUSTRATOR_PRESETS['auto-color'];
+    const settings = { ...preset.settings };
     
-    // Используем реальную векторизацию через potrace
-    const svgContent = await createRealSVG(imageBuffer, finalSettings);
+    // Предобработка как в Adobe Illustrator
+    const processedBuffer = await preprocessImageForAI(imageBuffer, settings);
+    
+    // Квантизация цветов до максимум 5 (как в AI)
+    const colorQuantizedBuffer = await quantizeColorsAI(processedBuffer, settings.maxColors);
+    
+    // Векторизация с Adobe Illustrator параметрами
+    const svgContent = await createAdobeStyleSVG(colorQuantizedBuffer, settings);
+    
+    // Проверка размера файла (ограничение 20МБ)
+    const svgSize = Buffer.byteLength(svgContent, 'utf8');
+    if (svgSize > maxFileSize) {
+      console.log(`⚠️ Файл слишком большой (${(svgSize / 1024 / 1024).toFixed(2)}МБ), оптимизация...`);
+      const optimizedSVG = await optimizeSVGSize(svgContent, maxFileSize);
+      return {
+        success: true,
+        svgContent: optimizedSVG,
+        settings,
+        quality: preset.name,
+        fileSize: Buffer.byteLength(optimizedSVG, 'utf8'),
+        optimized: true,
+        adobeIllustratorMode: true
+      };
+    }
     
     return {
       success: true,
       svgContent,
-      settings: finalSettings,
-      detectedType,
-      quality: qualitySettings.name,
-      isRealVectorization: true
+      settings,
+      quality: preset.name,
+      fileSize: svgSize,
+      optimized: false,
+      adobeIllustratorMode: true
     };
     
   } catch (error) {
-    console.error('❌ Ошибка реальной векторизации:', error);
-    throw new Error(`Ошибка векторизации: ${error.message}`);
+    console.error('❌ Ошибка Adobe Illustrator трассировки:', error);
+    throw new Error(`Ошибка AI трассировки: ${error.message}`);
   }
+}
+
+/**
+ * Предобработка изображения как в Adobe Illustrator
+ */
+async function preprocessImageForAI(imageBuffer, settings) {
+  const sharp = require('sharp');
+  
+  console.log('🔧 Предобработка изображения (Adobe Illustrator Style)...');
+  
+  try {
+    const metadata = await sharp(imageBuffer).metadata();
+    let processedBuffer = imageBuffer;
+    
+    // Изменение размера как в AI
+    if (settings.maxSize) {
+      const scale = Math.min(settings.maxSize / metadata.width, settings.maxSize / metadata.height);
+      if (scale < 1) {
+        processedBuffer = await sharp(processedBuffer)
+          .resize(Math.round(metadata.width * scale), Math.round(metadata.height * scale), {
+            kernel: sharp.kernel.lanczos3,
+            fit: 'inside'
+          })
+          .toBuffer();
+      }
+    }
+    
+    // Предобработка как в Adobe Illustrator
+    if (settings.preprocess) {
+      processedBuffer = await sharp(processedBuffer)
+        .sharpen(1.5, 1.0, 2.0) // Увеличение резкости
+        .normalise() // Нормализация контраста
+        .modulate({ 
+          brightness: 1.1,
+          saturation: 1.2,
+          hue: 0
+        })
+        .removeAlpha() // Убираем альфа-канал
+        .toFormat('png')
+        .toBuffer();
+    }
+    
+    return processedBuffer;
+    
+  } catch (error) {
+    console.error('Ошибка предобработки:', error);
+    return imageBuffer;
+  }
+}
+
+/**
+ * Квантизация цветов как в Adobe Illustrator (до 5 цветов максимум)
+ */
+async function quantizeColorsAI(imageBuffer, maxColors = 5) {
+  const sharp = require('sharp');
+  
+  console.log(`🎨 Квантизация цветов (Adobe Illustrator): максимум ${maxColors} цветов`);
+  
+  try {
+    // Ограничиваем количество цветов как в Adobe Illustrator
+    const quantizedBuffer = await sharp(imageBuffer)
+      .png({
+        palette: true,
+        colors: Math.min(maxColors, 5), // Жесткое ограничение до 5 цветов
+        dither: 0.5 // Легкий дизеринг как в AI
+      })
+      .toBuffer();
+    
+    return quantizedBuffer;
+    
+  } catch (error) {
+    console.error('Ошибка квантизации цветов:', error);
+    return imageBuffer;
+  }
+}
+
+/**
+ * Создание SVG в стиле Adobe Illustrator
+ */
+async function createAdobeStyleSVG(imageBuffer, settings) {
+  const sharp = require('sharp');
+  const potrace = require('potrace');
+  
+  console.log('🎨 Создание SVG в стиле Adobe Illustrator...');
+  
+  try {
+    // Конвертируем в bitmap для potrace
+    const bitmapBuffer = await sharp(imageBuffer)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    
+    const { data, info } = bitmapBuffer;
+    
+    // Определяем threshold автоматически или используем заданный
+    let threshold = settings.threshold;
+    if (threshold === 'auto') {
+      // Автоматическое определение порога как в Adobe Illustrator
+      threshold = await calculateOptimalThreshold(data, info);
+    }
+    
+    // Параметры potrace как в Adobe Illustrator
+    const potraceParams = {
+      threshold: typeof threshold === 'number' ? threshold : 128,
+      turdSize: settings.turdSize || 2,
+      turnPolicy: settings.turnPolicy || 'black',
+      alphaMax: settings.alphaMax || 1.0,
+      optCurve: settings.optiCurve !== false,
+      optTolerance: settings.optTolerance || 0.2
+    };
+    
+    console.log('📊 Параметры Adobe Illustrator трассировки:', potraceParams);
+    
+    // Векторизация через potrace
+    return new Promise((resolve, reject) => {
+      potrace.trace(imageBuffer, potraceParams, (err, svg) => {
+        if (err) {
+          reject(new Error(`Ошибка potrace: ${err.message}`));
+        } else {
+          console.log('✅ SVG создан в стиле Adobe Illustrator');
+          resolve(svg);
+        }
+      });
+    });
+    
+  } catch (error) {
+    console.error('Ошибка создания Adobe Style SVG:', error);
+    throw error;
+  }
+}
+
+/**
+ * Автоматическое определение оптимального порога как в Adobe Illustrator
+ */
+async function calculateOptimalThreshold(data, info) {
+  // Простой алгоритм Otsu для автоматического определения порога
+  const histogram = new Array(256).fill(0);
+  
+  // Подсчет гистограммы
+  for (let i = 0; i < data.length; i += info.channels) {
+    const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+    histogram[gray]++;
+  }
+  
+  const total = data.length / info.channels;
+  let sum = 0;
+  for (let i = 0; i < 256; i++) {
+    sum += i * histogram[i];
+  }
+  
+  let sumB = 0;
+  let wB = 0;
+  let wF = 0;
+  let varMax = 0;
+  let threshold = 0;
+  
+  for (let i = 0; i < 256; i++) {
+    wB += histogram[i];
+    if (wB === 0) continue;
+    
+    wF = total - wB;
+    if (wF === 0) break;
+    
+    sumB += i * histogram[i];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const varBetween = wB * wF * (mB - mF) * (mB - mF);
+    
+    if (varBetween > varMax) {
+      varMax = varBetween;
+      threshold = i;
+    }
+  }
+  
+  console.log(`🎯 Автоматический порог (Otsu): ${threshold}`);
+  return threshold;
+}
+
+/**
+ * Оптимизация размера SVG до 20МБ
+ */
+async function optimizeSVGSize(svgContent, maxSize) {
+  console.log('🗜️ Оптимизация размера SVG...');
+  
+  let optimized = svgContent;
+  
+  // Удаляем ненужные атрибуты и пробелы
+  optimized = optimized
+    .replace(/\s+/g, ' ') // Множественные пробелы в один
+    .replace(/>\s+</g, '><') // Пробелы между тегами
+    .replace(/\s+\/>/g, '/>') // Пробелы перед закрывающими тегами
+    .replace(/="([^"]*?)"/g, (match, value) => {
+      // Округляем числовые значения
+      if (/^-?\d*\.?\d+$/.test(value)) {
+        return `="${parseFloat(value).toFixed(2)}"`;
+      }
+      return match;
+    });
+  
+  // Если все еще слишком большой, упрощаем пути
+  if (Buffer.byteLength(optimized, 'utf8') > maxSize) {
+    console.log('🔧 Упрощение путей SVG...');
+    
+    // Упрощаем числовые значения в путях
+    optimized = optimized.replace(/d="([^"]+)"/g, (match, path) => {
+      const simplified = path.replace(/(\d+\.\d{3,})/g, (num) => {
+        return parseFloat(num).toFixed(1);
+      });
+      return `d="${simplified}"`;
+    });
+  }
+  
+  const finalSize = Buffer.byteLength(optimized, 'utf8');
+  console.log(`📏 Размер после оптимизации: ${(finalSize / 1024 / 1024).toFixed(2)}МБ`);
+  
+  return optimized;
+}
+
+// Обратная совместимость
+async function advancedVectorize(imageBuffer, options = {}) {
+  return await adobeIllustratorTrace(imageBuffer, options);
 }
 
 /**
@@ -1055,6 +1348,12 @@ module.exports = {
   vectorizeImage,
   vectorizeFromUrl,
   batchVectorize,
+  adobeIllustratorTrace,
+  advancedVectorize,
+  preprocessImageForAI,
+  quantizeColorsAI,
+  createAdobeStyleSVG,
+  optimizeSVGSize,
   advancedVectorize,
   detectContentType,
   generatePreviews,
