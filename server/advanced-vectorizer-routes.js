@@ -10,6 +10,50 @@ const path = require('path');
 const fs = require('fs').promises;
 const advancedVectorizer = require('../advanced-vectorizer.cjs');
 
+// Middleware для логирования запросов векторизатора
+const logVectorizerRequest = (req, res, next) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] Vectorizer API: ${req.method} ${req.path}`);
+  if (req.file) {
+    console.log(`  📁 File: ${req.file.originalname} (${(req.file.size / 1024).toFixed(1)}KB)`);
+  }
+  if (req.files && req.files.length > 0) {
+    console.log(`  📁 Files: ${req.files.length} files`);
+  }
+  next();
+};
+
+// Middleware для обработки ошибок векторизации
+const handleVectorizerError = (error, req, res, next) => {
+  console.error(`❌ Vectorizer Error [${req.method} ${req.path}]:`, error);
+  
+  // Специфичные ошибки векторизации
+  if (error.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({
+      success: false,
+      error: 'Файл слишком большой',
+      message: 'Максимальный размер файла: 10MB'
+    });
+  }
+  
+  if (error.message && error.message.includes('Unsupported file type')) {
+    return res.status(400).json({
+      success: false,
+      error: 'Неподдерживаемый тип файла',
+      message: 'Поддерживаемые форматы: JPEG, PNG, GIF, WebP, BMP'
+    });
+  }
+  
+  res.status(500).json({
+    success: false,
+    error: 'Ошибка векторизации',
+    message: error.message || 'Внутренняя ошибка сервера'
+  });
+};
+
+// Применяем middleware ко всем маршрутам
+router.use(logVectorizerRequest);
+
 // Настройка multer для загрузки файлов
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -40,17 +84,20 @@ router.post('/analyze', upload.single('image'), async (req, res) => {
       });
     }
 
-    const contentType = await advancedVectorizer.detectContentType(req.file.buffer);
+    const detectedType = await advancedVectorizer.detectContentType(req.file.buffer);
+    
+    // Адаптируем результат под ожидаемый формат
+    const analysis = {
+      detectedType: detectedType || 'artwork',
+      confidence: 0.8, // Фиксированная уверенность для совместимости
+      recommendedQuality: detectedType === 'logo' ? 'premium' : 'standard',
+      recommendedFormat: 'svg',
+      description: `Автоматически определен тип: ${detectedType || 'artwork'}`
+    };
     
     res.json({
       success: true,
-      analysis: {
-        detectedType: contentType.type,
-        confidence: contentType.confidence,
-        recommendedQuality: contentType.recommendedSettings.quality,
-        recommendedFormat: contentType.recommendedSettings.outputFormat,
-        description: contentType.description
-      }
+      analysis: analysis
     });
 
   } catch (error) {
@@ -328,21 +375,7 @@ router.get('/health', async (req, res) => {
   }
 });
 
-// Обработка ошибок multer
-router.use((error, req, res, next) => {
-  if (error instanceof multer.MulterError) {
-    if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({
-        success: false,
-        error: 'Файл слишком большой (максимум 10MB)'
-      });
-    }
-  }
-  
-  res.status(500).json({
-    success: false,
-    error: error.message
-  });
-});
+// Применяем обработчик ошибок векторизации ко всем маршрутам
+router.use(handleVectorizerError);
 
 module.exports = router;

@@ -276,6 +276,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.sendFile('logs-viewer.html', { root: '.' });
   });
   
+  // Веб-интерфейс векторизатора изображений
+  app.get('/vectorizer', (req, res) => {
+    res.sendFile('public/vectorizer-interface.html', { root: '.' });
+  });
+  
   // Перенаправляем запрос умного чата на HTML-страницу
   app.get('/smart-chat', (req, res) => {
     res.sendFile('booomerangs-smart-chat.html', { root: '.' });
@@ -298,6 +303,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // API для стриминга от провайдеров, поддерживающих stream=True
   const streamingRoutes = require('./streaming-routes');
   app.use('/api/streaming', streamingRoutes);
+  
+  // API для продвинутой векторизации изображений
+  try {
+    const vectorizerRoutes = require('./advanced-vectorizer-routes');
+    app.use('/api/vectorizer', vectorizerRoutes);
+    Logger.success('Модуль векторизации подключен к основному API');
+  } catch (error) {
+    Logger.error('Не удалось подключить модуль векторизации:', error);
+  }
   
   // API для Flask-стриминга (надежный вариант)
   const flaskStreamBridge = require('./stream-flask-bridge');
