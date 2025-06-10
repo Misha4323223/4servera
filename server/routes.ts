@@ -138,17 +138,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Создаем маршрут для доступа к сгенерированным изображениям с поддержкой скачивания
-  app.use('/output', (req, res, next) => {
+  app.get('/output/*', (req, res) => {
     const outputPath = path.join(__dirname, '..', 'output');
+    const filePath = req.params[0]; // Получаем путь после /output/
     
     // Проверяем параметр download для принудительного скачивания
     if (req.query.download === 'true') {
-      const fileName = path.basename(req.path);
+      const fileName = path.basename(filePath);
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       res.setHeader('Content-Type', 'application/octet-stream');
     }
     
-    res.sendFile(req.path, { root: outputPath }, (err) => {
+    res.sendFile(filePath, { root: outputPath }, (err) => {
       if (err) {
         console.error('Ошибка отправки файла:', err);
         res.status(404).send('Файл не найден');
