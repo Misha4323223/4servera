@@ -106,60 +106,15 @@ async function startVectorizerServer() {
   detailedLog('📝 Настройка обработчиков событий процесса...');
   logSystemState('startup');
   
-  // Отслеживание ВСЕХ системных событий
-  const allProcessEvents = [
-    'uncaughtException', 'unhandledRejection', 'warning', 'exit', 'beforeExit',
-    'SIGTERM', 'SIGINT', 'SIGHUP', 'SIGBREAK', 'message', 'disconnect',
-    'multipleResolves', 'rejectionHandled'
-  ];
+  // Минимальные обработчики критических событий (без дублирования)
+  process.once('uncaughtException', (error) => {
+    console.error('❌ FATAL: uncaughtException:', error.message);
+    process.exit(1);
+  });
   
-  allProcessEvents.forEach(eventName => {
-    process.on(eventName, (...args) => {
-      // Убираем избыточное логирование для каждого события
-      detailedLog(`🔔 PROCESS EVENT: ${eventName}`, 'EVENT');
-      
-      if (eventName === 'uncaughtException') {
-        const error = args[0];
-        logError('❌ FATAL: uncaughtException detected', error);
-        logSystemState('uncaughtException');
-        process.exit(1);
-      }
-      
-      if (eventName === 'unhandledRejection') {
-        const [reason, promise] = args;
-        logError('❌ FATAL: unhandledRejection detected: ' + reason);
-        logSystemState('unhandledRejection');
-        if (reason instanceof Error) {
-          logError('   Rejection details', reason);
-        }
-        process.exit(1);
-      }
-      
-      if (eventName === 'exit') {
-        logSystemState('process-exit');
-        detailedLog(`🚪 PROCESS EXIT CODE: ${args[0]}`, 'EXIT');
-        detailedLog(`   Exit reason: Normal termination or forced exit`, 'EXIT');
-        detailedLog(`   Stack trace at exit: ${new Error().stack}`, 'EXIT');
-      }
-      
-      if (eventName === 'beforeExit') {
-        logSystemState('before-exit');
-        detailedLog(`🚪 BEFORE EXIT CODE: ${args[0]}`, 'EXIT');
-        detailedLog(`   Event loop empty, process about to exit`, 'EXIT');
-        detailedLog(`   Stack trace at beforeExit: ${new Error().stack}`, 'EXIT');
-        
-        // Логируем событие без попыток "спасения"
-        detailedLog('🚪 Process entering beforeExit state', 'EXIT');
-      }
-      
-      if (eventName === 'warning') {
-        const warning = args[0];
-        detailedLog(`⚠️ Process Warning: ${warning.name} - ${warning.message}`, 'WARN');
-        if (warning.stack) {
-          detailedLog(`   Stack: ${warning.stack}`, 'WARN');
-        }
-      }
-    });
+  process.once('unhandledRejection', (reason, promise) => {
+    console.error('❌ FATAL: unhandledRejection:', reason);
+    process.exit(1);
   });
 
   // Настройка CORS для кросс-доменных запросов
