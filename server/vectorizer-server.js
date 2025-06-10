@@ -93,7 +93,7 @@ async function startVectorizerServer() {
   }
 
   const app = express();
-  const PORT = process.env.VECTORIZER_PORT || 5000;
+  const PORT = process.env.VECTORIZER_PORT || 3001;
 
   // Детальное логирование для диагностики
   detailedLog('🔍 Диагностика запуска векторизатора:');
