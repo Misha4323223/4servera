@@ -1627,9 +1627,9 @@ ${message ? `\n💭 **Ваш запрос:** ${message}` : ''}
     }
   });
 
-  // Подключаем маршруты продвинутого векторизатора
-  const advancedVectorizerRoutes = require('./advanced-vectorizer-routes');
-  app.use('/api/vectorizer', advancedVectorizerRoutes);
+  // Подключаем маршруты продвинутого векторизатора - временно отключено из-за ES6 модулей
+  // const advancedVectorizerRoutes = require('./advanced-vectorizer-routes');
+  // app.use('/api/vectorizer', advancedVectorizerRoutes);
   Logger.info('Подключены маршруты продвинутого векторизатора: /api/vectorizer');
 
   // Обновляем вызовы генерации изображений для передачи sessionId и userId
