@@ -530,9 +530,89 @@ async function professionalVectorize(imageBuffer, originalName = 'image', option
   }
 }
 
+/**
+ * Векторизация изображения по URL
+ */
+async function vectorizeFromUrl(imageUrl, options = {}) {
+  try {
+    console.log(`🌐 Начинаем векторизацию по URL: ${imageUrl.substring(0, 100)}...`);
+    
+    // Скачиваем изображение
+    const https = require('https');
+    const http = require('http');
+    
+    const downloadImage = (url) => {
+      return new Promise((resolve, reject) => {
+        const client = url.startsWith('https') ? https : http;
+        
+        client.get(url, (response) => {
+          if (response.statusCode !== 200) {
+            reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+            return;
+          }
+          
+          const chunks = [];
+          response.on('data', (chunk) => chunks.push(chunk));
+          response.on('end', () => {
+            const buffer = Buffer.concat(chunks);
+            resolve(buffer);
+          });
+        }).on('error', reject);
+      });
+    };
+    
+    const imageBuffer = await downloadImage(imageUrl);
+    console.log(`📥 Изображение скачано: ${(imageBuffer.length / 1024).toFixed(1)}KB`);
+    
+    // Извлекаем имя файла из URL или создаем по умолчанию
+    let originalName = 'downloaded_image';
+    try {
+      const urlObj = new URL(imageUrl);
+      const pathname = urlObj.pathname;
+      if (pathname && pathname !== '/') {
+        originalName = path.basename(pathname) || 'downloaded_image';
+      }
+    } catch (e) {
+      // Используем имя по умолчанию
+    }
+    
+    console.log(`🎯 Передаем на векторизацию: ${originalName}`);
+    
+    // Используем существующую функцию векторизации
+    const result = await vectorizeImage(imageBuffer, originalName, options);
+    
+    if (result.success) {
+      console.log(`✅ Векторизация по URL завершена: ${result.filename}`);
+      return {
+        success: true,
+        filename: result.filename,
+        filepath: result.filepath,
+        svgContent: result.svgContent,
+        detectedType: result.detectedType,
+        quality: result.quality,
+        settings: result.settings,
+        optimization: result.optimization,
+        sourceUrl: imageUrl,
+        message: `Векторизация по URL завершена (${result.quality}, ${result.detectedType})`
+      };
+    } else {
+      throw new Error(result.error || 'Неизвестная ошибка векторизации');
+    }
+    
+  } catch (error) {
+    console.error('❌ Ошибка векторизации по URL:', error);
+    return {
+      success: false,
+      error: error.message,
+      sourceUrl: imageUrl
+    };
+  }
+}
+
 // Экспорт всех функций для интеграции в основной чат
 module.exports = {
   vectorizeImage,
+  vectorizeFromUrl,
   batchVectorize,
   advancedVectorize,
   detectContentType,
