@@ -179,7 +179,8 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
           provider: 'Vectorizer-5006',
           error: error.message
         };
-      } else {
+      }
+    } else {
         // Изображение не найдено в истории сессии
         return {
           success: false,
