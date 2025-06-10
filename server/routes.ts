@@ -38,13 +38,6 @@ import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import multer from 'multer';
 
-// Импортируем модуль интеграции векторизатора
-import { 
-  isVectorizationRequest, 
-  handleVectorizationRequest, 
-  checkVectorizerHealth 
-} from './vectorizer-integration.js';
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(__filename);
