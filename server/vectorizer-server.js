@@ -64,12 +64,15 @@ function logSystemState(reason = 'periodic') {
   logEntry += `[${timestamp}] [SYSTEM] Active Requests: ${requests.length}\n`;
   logEntry += `[${timestamp}] [SYSTEM] Event Loop Delay: ${process.hrtime.bigint()}\n`;
   
-  // Детали активных handles
-  handles.forEach((handle, index) => {
+  // Детали активных handles (ограничиваем до 5)
+  handles.slice(0, 5).forEach((handle, index) => {
     if (handle && handle.constructor) {
       logEntry += `[${timestamp}] [SYSTEM] Handle ${index}: ${handle.constructor.name}\n`;
     }
   });
+  if (handles.length > 5) {
+    logEntry += `[${timestamp}] [SYSTEM] ... и еще ${handles.length - 5} handles\n`;
+  }
   
   logStream.write(logEntry);
   detailedLog(`SYSTEM STATE: PID=${process.pid}, Handles=${handles.length}, Memory=${Math.round(mem.heapUsed/1024/1024)}MB`, 'SYSTEM');
@@ -115,11 +118,8 @@ async function startVectorizerServer() {
   
   allProcessEvents.forEach(eventName => {
     process.on(eventName, (...args) => {
-      logSystemState(`event-${eventName}`);
-      detailedLog(`🔔 CRITICAL PROCESS EVENT: ${eventName}`, 'EVENT');
-      detailedLog(`   Args: ${JSON.stringify(args, null, 2)}`, 'EVENT');
-      detailedLog(`   Time: ${new Date().toISOString()}`, 'EVENT');
-      detailedLog(`   Process uptime: ${process.uptime()}s`, 'EVENT');
+      // Убираем избыточное логирование для каждого события
+      detailedLog(`🔔 PROCESS EVENT: ${eventName}`, 'EVENT');
       
       if (eventName === 'uncaughtException') {
         const error = args[0];
@@ -260,69 +260,30 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`📁 Output files: http://localhost:${PORT}/output`);
   console.log(`⏰ Время запуска: ${new Date().toISOString()}`);
   
-  // Интенсивная проверка состояния с глубокой диагностикой
+  // Упрощенная проверка состояния без избыточного логирования
   const healthInterval = setInterval(() => {
     try {
-      // ДЕТАЛЬНАЯ ДИАГНОСТИКА ВНУТРИ HEALTHINTERVAL
-      detailedLog(`🌀 HealthInterval АКТИВЕН — server.listening=${server.listening}`, 'HEALTH_DEBUG');
-      detailedLog(`🌀 HealthInterval ID: ${healthInterval._idleTimeout}ms, repeat=${healthInterval._repeat}`, 'HEALTH_DEBUG');
-      detailedLog(`🌀 Process PID: ${process.pid}, uptime: ${process.uptime()}s`, 'HEALTH_DEBUG');
-      
-      logSystemState('heartbeat');
-      
       const memUsage = process.memoryUsage();
-      const uptime = process.uptime();
       const handles = process._getActiveHandles();
-      const requests = process._getActiveRequests();
       
-      // Проверяем что интервал не очистился
-      if (!healthInterval || healthInterval._destroyed) {
-        detailedLog('❌ CRITICAL: HealthInterval был уничтожен!', 'HEALTH_DEBUG');
-        logSystemState('interval-destroyed');
-      }
-      
-      detailedLog(`💓 HEARTBEAT: Uptime=${Math.round(uptime)}s, Memory=${Math.round(memUsage.heapUsed / 1024 / 1024)}MB, Handles=${handles.length}`, 'HEARTBEAT');
-      detailedLog(`💓 HEARTBEAT DETAILS: server.listening=${server.listening}, server.address=${JSON.stringify(server.address())}`, 'HEARTBEAT');
+      console.log(`💓 Health: ${Math.round(process.uptime())}s, ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB, ${handles.length} handles`);
       
       // Критическая проверка состояния сервера
       if (!server.listening) {
-        logError('❌ CRITICAL: Server no longer listening!');
-        detailedLog(`   Server address: ${JSON.stringify(server.address())}`, 'CRITICAL');
-        detailedLog(`   Server connections: ${server.connections || 'unknown'}`, 'CRITICAL');
-        logSystemState('server-not-listening');
+        console.error('❌ CRITICAL: Server no longer listening!');
         clearInterval(healthInterval);
-        detailedLog('❌ HealthInterval CLEARED due to server not listening', 'HEALTH_DEBUG');
+        return;
       }
       
       // Проверка утечек памяти
-      if (memUsage.heapUsed > 100 * 1024 * 1024) { // 100MB
-        detailedLog(`⚠️ HIGH MEMORY USAGE: ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`, 'WARN');
+      if (memUsage.heapUsed > 100 * 1024 * 1024) {
+        console.warn(`⚠️ HIGH MEMORY: ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`);
       }
-      
-      // Проверка event loop
-      if (handles.length === 0 && requests.length === 0) {
-        detailedLog('⚠️ EVENT LOOP NEARLY EMPTY - critical state detected', 'WARN');
-        logSystemState('empty-event-loop');
-      }
-      
-      // Проверка аномалий в количестве handles
-      if (handles.length > 10) {
-        detailedLog(`⚠️ HIGH HANDLE COUNT: ${handles.length}`, 'WARN');
-        handles.forEach((handle, i) => {
-          if (handle && handle.constructor) {
-            detailedLog(`   Handle ${i}: ${handle.constructor.name}`, 'HANDLE');
-          }
-        });
-      }
-      
-      detailedLog(`🌀 HealthInterval ЗАВЕРШЕН успешно`, 'HEALTH_DEBUG');
       
     } catch (error) {
-      logError('❌ CRITICAL heartbeat error', error);
-      detailedLog(`❌ HealthInterval ERROR: ${error.message}`, 'HEALTH_DEBUG');
-      logSystemState('heartbeat-error');
+      console.error('❌ Heartbeat error:', error.message);
     }
-  }, 2000);
+  }, 10000);
   
   // Сохраняем интервал для очистки при завершении
   server.healthInterval = healthInterval;
@@ -367,10 +328,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     }
   };
   
-  // Переопределяем обработчики для корректной очистки
-  process.removeAllListeners('SIGTERM');
-  process.removeAllListeners('SIGINT');
-  
+  // Упрощенные обработчики завершения
   process.on('SIGTERM', () => {
     console.log('📥 Получен SIGTERM, завершаем работу...');
     cleanupAndExit(0);
@@ -380,6 +338,27 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('📥 Получен SIGINT, завершаем работу...');
     cleanupAndExit(0);
   });
+
+  // Упрощенные обработчики серверных событий
+  server.on('error', (error) => {
+    console.error('❌ Server Error:', error.message);
+    if (error.code === 'EADDRINUSE') {
+      console.error(`Port ${PORT} уже используется`);
+      process.exit(1);
+    }
+  });
+
+  server.on('close', () => {
+    console.log('🛑 Сервер закрыт');
+    if (server.healthInterval) {
+      clearInterval(server.healthInterval);
+    }
+    if (server.keepAliveIntervals) {
+      server.keepAliveIntervals.forEach(interval => clearInterval(interval));
+    }
+  });
+
+  console.log('✅ Векторизатор полностью инициализирован и готов к работе');
 });
 
 // Глубокое отслеживание событий HTTP сервера
@@ -432,10 +411,7 @@ serverEvents.forEach(eventName => {
   // Предотвращаем автоматическое завершение процесса
   console.log('🔒 Процесс зафиксирован для работы сервера');
   
-  // Keep-alive механизм для предотвращения завершения
-  const keepAlive = setInterval(() => {
-    // Пустая функция для поддержания event loop
-  }, 30000);
+  // Дополнительный keep-alive уже есть в keepAliveIntervals
   
 
   
