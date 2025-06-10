@@ -1354,7 +1354,6 @@ module.exports = {
   quantizeColorsAI,
   createAdobeStyleSVG,
   optimizeSVGSize,
-  advancedVectorize,
   detectContentType,
   generatePreviews,
   convertToFormat,

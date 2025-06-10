@@ -273,15 +273,15 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
           let optimizeFor = 'web';
           let generatePreviews = false;
           
-          // Анализируем запрос для выбора качества
-          if (queryLowerForSvg.includes('ультра') || queryLowerForSvg.includes('ultra')) {
-            quality = 'ultra';
-          } else if (queryLowerForSvg.includes('премиум') || queryLowerForSvg.includes('профи')) {
-            quality = 'premium';
-          } else if (queryLowerForSvg.includes('стандарт')) {
-            quality = 'standard';
-          } else if (queryLowerForSvg.includes('драфт') || queryLowerForSvg.includes('черновик')) {
-            quality = 'draft';
+          // Анализируем запрос для выбора режима Adobe Illustrator
+          if (queryLowerForSvg.includes('высок') || queryLowerForSvg.includes('детал') || queryLowerForSvg.includes('точн')) {
+            quality = 'high-fidelity';
+          } else if (queryLowerForSvg.includes('мало цвет') || queryLowerForSvg.includes('упрощ')) {
+            quality = 'low-color';
+          } else if (queryLowerForSvg.includes('шелкогр') || queryLowerForSvg.includes('печат')) {
+            quality = 'silkscreen';
+          } else {
+            quality = 'auto-color'; // Adobe Illustrator Auto-Color по умолчанию
           }
           
           // Определяем форматы
@@ -319,39 +319,42 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
           const response = await fetch(lastImageUrl);
           const imageBuffer = await response.buffer();
           
-          // Проверяем доступность векторизатор-менеджера
+          // Используем Adobe Illustrator трассировку
           let result;
           try {
-            // Пытаемся использовать векторизатор-менеджер
-            result = await vectorizerManager.professionalVectorize(
+            SmartLogger.route(`🎨 Запуск Adobe Illustrator Image Trace (режим: ${quality})`);
+            
+            result = await advancedVectorizer.adobeIllustratorTrace(
               imageBuffer,
-              'user_image',
               {
                 quality,
-                formats,
-                optimizeFor,
-                generatePreviews,
-                includeMetadata: true
+                outputFormat: 'svg',
+                maxFileSize: 20 * 1024 * 1024 // 20МБ максимум
               }
             );
-          } catch (managerError) {
-            SmartLogger.route('Векторизатор-менеджер недоступен, используем прямой вызов');
-            // Fallback к прямому вызову модуля
-            result = await advancedVectorizer.professionalVectorize(
+            
+            if (!result.success) {
+              throw new Error(result.error || 'Ошибка Adobe Illustrator трассировки');
+            }
+          } catch (adobeError) {
+            SmartLogger.route('Adobe Illustrator трассировка недоступна, используем fallback');
+            // Fallback к обычной векторизации
+            result = await advancedVectorizer.vectorizeImage(
               imageBuffer,
               'user_image',
-              {
-                quality,
-                formats,
-                optimizeFor,
-                generatePreviews,
-                includeMetadata: true
-              }
+              { quality, outputFormat: 'svg' }
             );
           }
           
           if (result.success) {
-            let responseText = `🎨 **Профессиональная векторизация завершена!**\n\n`;
+            let responseText = `✅ **Adobe Illustrator Image Trace завершен!**\n\n`;
+            responseText += `🎨 **Режим:** ${result.quality}\n`;
+            responseText += `📄 **Формат:** SVG (максимум 5 цветов)\n`;
+            responseText += `📏 **Размер файла:** ${(result.fileSize / 1024).toFixed(1)}KB\n`;
+            if (result.optimized) {
+              responseText += `🗜️ **Оптимизирован:** Да (ограничение 20МБ)\n`;
+            }
+            responseText += `💾 **Совместимость:** Adobe Illustrator, Figma, Canva\n\n`;
             
             // Информация о качестве
             responseText += `📊 **Параметры обработки:**\n`;
