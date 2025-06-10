@@ -140,7 +140,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Создаем маршрут для доступа к сгенерированным изображениям с поддержкой скачивания
   app.use('/output', (req, res, next) => {
     const outputPath = path.join(__dirname, '..', 'output');
-    const filePath = path.join(outputPath, req.path);
     
     // Проверяем параметр download для принудительного скачивания
     if (req.query.download === 'true') {
@@ -149,7 +148,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader('Content-Type', 'application/octet-stream');
     }
     
-    res.sendFile(req.path, { root: outputPath });
+    res.sendFile(req.path, { root: outputPath }, (err) => {
+      if (err) {
+        console.error('Ошибка отправки файла:', err);
+        res.status(404).send('Файл не найден');
+      }
+    });
   });
   
   // Тестовая страница
