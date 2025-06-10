@@ -249,37 +249,45 @@ async function createSilkscreenSVG(imageBuffer, settings) {
 }
 
 /**
- * Извлечение доминирующих цветов из изображения
+ * Упрощенное извлечение доминирующих цветов - ИСПРАВЛЕННАЯ ВЕРСИЯ
  */
 async function extractDominantColors(imageBuffer, maxColors = 5) {
   const sharp = require('sharp');
   
   try {
-    // Уменьшаем изображение для быстрого анализа цветов
-    const { data, info } = await sharp(imageBuffer)
-      .resize(100, 100, { fit: 'inside' })
+    // Используем квантизованное изображение напрямую
+    const quantizedBuffer = await sharp(imageBuffer)
+      .png({
+        palette: true,
+        colors: maxColors,
+        dither: 0.5
+      })
+      .toBuffer();
+    
+    // Анализируем квантизованное изображение
+    const { data, info } = await sharp(quantizedBuffer)
+      .resize(50, 50, { fit: 'inside' })
       .raw()
       .toBuffer({ resolveWithObject: true });
     
     const colorMap = new Map();
     
-    // Анализируем пиксели и считаем частоту цветов
+    // Собираем уникальные цвета
     for (let i = 0; i < data.length; i += info.channels) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
       
-      // Группируем похожие цвета (квантизация)
-      const quantizedR = Math.round(r / 32) * 32;
-      const quantizedG = Math.round(g / 32) * 32;
-      const quantizedB = Math.round(b / 32) * 32;
+      // Пропускаем полностью прозрачные или слишком темные/светлые пиксели
+      if (info.channels === 4 && data[i + 3] < 128) continue;
+      if (r + g + b < 30 || r + g + b > 750) continue;
       
-      const colorKey = `${quantizedR},${quantizedG},${quantizedB}`;
+      const colorKey = `${r},${g},${b}`;
       const count = colorMap.get(colorKey) || 0;
       colorMap.set(colorKey, count + 1);
     }
     
-    // Сортируем цвета по частоте использования
+    // Сортируем и возвращаем топ цвета
     const sortedColors = Array.from(colorMap.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, maxColors)
@@ -292,20 +300,32 @@ async function extractDominantColors(imageBuffer, maxColors = 5) {
         };
       });
     
+    console.log(`🎨 Извлечено цветов: ${sortedColors.length}`, sortedColors.map(c => c.hex));
+    
+    // Если не найдено цветов, возвращаем контрастные базовые
+    if (sortedColors.length === 0) {
+      return [
+        { r: 0, g: 0, b: 0, hex: '#000000', count: 1 },
+        { r: 255, g: 255, b: 255, hex: '#ffffff', count: 1 }
+      ];
+    }
+    
     return sortedColors;
     
   } catch (error) {
     console.error('Ошибка извлечения цветов:', error);
-    // Возвращаем базовые цвета
+    // Возвращаем контрастную палитру для шелкографии
     return [
       { r: 0, g: 0, b: 0, hex: '#000000', count: 1 },
+      { r: 255, g: 0, b: 0, hex: '#ff0000', count: 1 },
+      { r: 0, g: 0, b: 255, hex: '#0000ff', count: 1 },
       { r: 255, g: 255, b: 255, hex: '#ffffff', count: 1 }
     ];
   }
 }
 
 /**
- * Создание цветовой маски для конкретного цвета
+ * Улучшенное создание цветовой маски для конкретного цвета
  */
 async function createColorMask(imageBuffer, targetColor, settings) {
   const sharp = require('sharp');
@@ -315,8 +335,11 @@ async function createColorMask(imageBuffer, targetColor, settings) {
       .raw()
       .toBuffer({ resolveWithObject: true });
     
-    const maskData = Buffer.alloc(data.length);
-    const tolerance = 40; // Допуск для схожих цветов
+    const maskData = Buffer.alloc(info.width * info.height); // Только один канал
+    const tolerance = 60; // Увеличенный допуск для лучшего захвата
+    let pixelCount = 0;
+    
+    console.log(`🎯 Создание маски для цвета ${targetColor.hex} с допуском ${tolerance}`);
     
     // Создаем маску для целевого цвета
     for (let i = 0; i < data.length; i += info.channels) {
@@ -324,32 +347,42 @@ async function createColorMask(imageBuffer, targetColor, settings) {
       const g = data[i + 1];
       const b = data[i + 2];
       
-      // Проверяем, близок ли цвет к целевому
+      // Используем улучшенное вычисление расстояния (weighted RGB)
+      const deltaR = r - targetColor.r;
+      const deltaG = g - targetColor.g;
+      const deltaB = b - targetColor.b;
+      
+      // Взвешенное расстояние учитывает восприятие человеческим глазом
       const colorDistance = Math.sqrt(
-        Math.pow(r - targetColor.r, 2) +
-        Math.pow(g - targetColor.g, 2) +
-        Math.pow(b - targetColor.b, 2)
+        2 * deltaR * deltaR +
+        4 * deltaG * deltaG +
+        3 * deltaB * deltaB
       );
       
+      const pixelIndex = Math.floor(i / info.channels);
+      
       if (colorDistance <= tolerance) {
-        // Белый пиксель (область цвета)
-        maskData[i] = 255;
-        maskData[i + 1] = 255;
-        maskData[i + 2] = 255;
+        maskData[pixelIndex] = 255; // Белый пиксель (область цвета)
+        pixelCount++;
       } else {
-        // Черный пиксель (фон)
-        maskData[i] = 0;
-        maskData[i + 1] = 0;
-        maskData[i + 2] = 0;
+        maskData[pixelIndex] = 0; // Черный пиксель (фон)
       }
     }
     
-    // Создаем изображение из маски
+    console.log(`📊 Маска для ${targetColor.hex}: ${pixelCount} пикселей (${((pixelCount / (info.width * info.height)) * 100).toFixed(1)}%)`);
+    
+    // Если маска слишком мала, возвращаем null
+    if (pixelCount < 100) {
+      console.log(`⚠️ Слишком мало пикселей для цвета ${targetColor.hex}, пропускаем`);
+      return null;
+    }
+    
+    // Создаем изображение из маски (grayscale)
     const maskBuffer = await sharp(maskData, {
       raw: {
         width: info.width,
         height: info.height,
-        channels: info.channels
+        channels: 1
       }
     })
     .png()
