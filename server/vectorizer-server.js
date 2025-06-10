@@ -93,7 +93,7 @@ async function startVectorizerServer() {
   }
 
   const app = express();
-  const PORT = process.env.VECTORIZER_PORT || 3001;
+  const PORT = process.env.VECTORIZER_PORT || 5000;
 
   // Детальное логирование для диагностики
   detailedLog('🔍 Диагностика запуска векторизатора:');
@@ -349,17 +349,46 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   // Сохраняем интервал для очистки при завершении
   server.healthInterval = healthInterval;
   
-  // Принудительно держим процесс живым - создаем постоянный интервал
-  const keepAliveInterval = setInterval(() => {
-    // Этот интервал существует только для поддержания event loop
-    // Логируем раз в минуту чтобы не засорять вывод
-    if (Date.now() % 60000 < 2000) {
-      console.log(`🔄 Keep-alive: процесс активен, PID: ${process.pid}`);
-    }
-  }, 1000);
+  // МНОЖЕСТВЕННЫЕ механизмы удержания процесса
+  const keepAliveIntervals = [];
   
-  // Сохраняем keep-alive интервал
-  server.keepAliveInterval = keepAliveInterval;
+  // Основной keep-alive интервал  
+  const mainKeepAlive = setInterval(() => {
+    detailedLog(`🔄 MAIN Keep-alive: процесс активен, PID: ${process.pid}`, 'KEEPALIVE');
+  }, 5000);
+  keepAliveIntervals.push(mainKeepAlive);
+  
+  // Дополнительные интервалы для усиления
+  const auxKeepAlive1 = setInterval(() => {
+    // Пустая функция для удержания event loop
+  }, 1000);
+  keepAliveIntervals.push(auxKeepAlive1);
+  
+  const auxKeepAlive2 = setInterval(() => {
+    // Еще один интервал
+  }, 3000);
+  keepAliveIntervals.push(auxKeepAlive2);
+  
+  // TCP keep-alive механизм (синхронный импорт)
+  import('net').then(net => {
+    const dummyServer = net.createServer();
+    dummyServer.listen(0, () => {
+      detailedLog(`🔌 Dummy TCP server для keep-alive на порту: ${dummyServer.address().port}`, 'KEEPALIVE');
+    });
+    server.dummyServer = dummyServer;
+  });
+  
+  // Принудительное удержание через setTimeout цепочку
+  function chainedTimeout() {
+    setTimeout(() => {
+      detailedLog('⏰ Chained timeout executed', 'KEEPALIVE');
+      chainedTimeout(); // Рекурсивная цепочка
+    }, 10000);
+  }
+  chainedTimeout();
+  
+  // Сохраняем keep-alive интервалы
+  server.keepAliveIntervals = keepAliveIntervals;
   
   // Обновляем обработчики завершения для очистки интервалов
   const cleanupAndExit = (code = 0) => {
