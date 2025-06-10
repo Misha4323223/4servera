@@ -187,6 +187,73 @@ router.post('/convert', upload.single('image'), async (req, res) => {
 });
 
 /**
+ * POST /api/vectorizer/convert-url
+ * Конвертация изображения по URL в векторный формат
+ */
+router.post('/convert-url', async (req, res) => {
+  try {
+    const { imageUrl, quality, outputFormat } = req.body;
+
+    if (!imageUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'URL изображения не предоставлен'
+      });
+    }
+
+    // Проверяем что это валидный URL
+    try {
+      new URL(imageUrl);
+    } catch (urlError) {
+      return res.status(400).json({
+        success: false,
+        error: 'Некорректный URL изображения'
+      });
+    }
+
+    const options = {
+      quality: quality || 'simple',
+      outputFormat: outputFormat || 'svg',
+      optimizeFor: 'web',
+      autoDetectType: true
+    };
+
+    console.log(`🌐 Векторизация по URL:`, {
+      url: imageUrl.substring(0, 100) + '...',
+      options
+    });
+
+    // Вызываем функцию из advanced-vectorizer.cjs для работы с URL
+    const result = await advancedVectorizer.vectorizeFromUrl(imageUrl, options);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        result: {
+          svgContent: result.svgContent,
+          detectedType: result.detectedType,
+          quality: result.quality,
+          filename: result.filename,
+          optimizationStats: result.optimization
+        }
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+
+  } catch (error) {
+    console.error('Ошибка векторизации по URL:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
  * POST /api/vectorizer/professional
  * Профессиональная векторизация с полным набором опций
  */
