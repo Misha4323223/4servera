@@ -54,40 +54,12 @@ async function generateImage(prompt, style = 'realistic', previousImage = null, 
         // Прямой вызов Pollinations API
         const enhancedPrompt = `high quality draw ${prompt}, detailed, professional`;
         const imageId = Date.now();
-        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?width=1024&height=1024&nologo=true&enhance=true&seed=${imageId}`;
+        const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?width=1024&height=1024&nologo=true&enhance=true&seed=${imageId}`;
         
-        console.log('🔄 [HYBRID] Загружаем изображение от Pollinations.ai...');
-        
-        // Загружаем изображение
-        const fetch = require('node-fetch');
-        const response = await fetch(pollinationsUrl);
-        
-        if (!response.ok) {
-            throw new Error(`Ошибка загрузки: ${response.status}`);
-        }
-        
-        // Сохраняем изображение локально
-        const fs = require('fs');
-        const path = require('path');
-        
-        // Создаем папку если её нет
-        const outputDir = path.join(__dirname, '..', 'output', 'images');
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-        }
-        
-        // Сохраняем файл
-        const filename = `generated_${imageId}.png`;
-        const filepath = path.join(outputDir, filename);
-        const buffer = await response.buffer();
-        fs.writeFileSync(filepath, buffer);
-        
-        const localImageUrl = `/output/images/${filename}`;
-        
-        console.log('✅ [HYBRID] Изображение сохранено локально:', localImageUrl);
+        console.log('✅ [HYBRID] Изображение создано через Pollinations.ai');
         return {
             success: true,
-            imageUrl: localImageUrl,
+            imageUrl: imageUrl,
             provider: 'Pollinations_AI',
             operation: 'generate'
         };
