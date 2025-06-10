@@ -199,55 +199,290 @@ async function quantizeColorsAI(imageBuffer, maxColors = 5) {
 }
 
 /**
- * Создание SVG для шелкографии
+ * Создание цветного SVG для шелкографии
  */
 async function createSilkscreenSVG(imageBuffer, settings) {
   const sharp = require('sharp');
   const potrace = require('potrace');
   
-  console.log('🎨 Создание SVG в стиле Adobe Illustrator...');
+  console.log('🎨 Создание цветного SVG для шелкографии...');
   
   try {
-    // Конвертируем в bitmap для potrace
-    const bitmapBuffer = await sharp(imageBuffer)
+    // Извлекаем доминирующие цвета из квантизованного изображения
+    const dominantColors = await extractDominantColors(imageBuffer, settings.maxColors);
+    console.log(`🎨 Извлечены цвета:`, dominantColors);
+    
+    // Создаем отдельный слой для каждого цвета
+    const colorLayers = [];
+    
+    for (let i = 0; i < dominantColors.length; i++) {
+      const color = dominantColors[i];
+      console.log(`🔍 Обрабатываем цвет ${i + 1}/${dominantColors.length}: ${color.hex}`);
+      
+      // Создаем маску для этого цвета
+      const colorMask = await createColorMask(imageBuffer, color, settings);
+      
+      if (colorMask) {
+        // Векторизуем маску через potrace
+        const layerSVG = await vectorizeColorLayer(colorMask, color, settings);
+        if (layerSVG) {
+          colorLayers.push({
+            color: color.hex,
+            svg: layerSVG,
+            paths: extractSVGPaths(layerSVG)
+          });
+        }
+      }
+    }
+    
+    // Объединяем все цветные слои в один SVG
+    const finalSVG = combineColorLayers(colorLayers, imageBuffer);
+    
+    console.log(`✅ Цветной SVG создан с ${colorLayers.length} цветами`);
+    return finalSVG;
+    
+  } catch (error) {
+    console.error('❌ Ошибка создания цветного SVG:', error);
+    // Fallback к монохромному potrace
+    return createMonochromeBackup(imageBuffer, settings);
+  }
+}
+
+/**
+ * Извлечение доминирующих цветов из изображения
+ */
+async function extractDominantColors(imageBuffer, maxColors = 5) {
+  const sharp = require('sharp');
+  
+  try {
+    // Уменьшаем изображение для быстрого анализа цветов
+    const { data, info } = await sharp(imageBuffer)
+      .resize(100, 100, { fit: 'inside' })
       .raw()
       .toBuffer({ resolveWithObject: true });
     
-    const { data, info } = bitmapBuffer;
+    const colorMap = new Map();
     
-    // Определяем threshold автоматически или используем заданный
-    let threshold = settings.threshold;
-    if (threshold === 'auto') {
-      // Автоматическое определение порога как в Adobe Illustrator
-      threshold = await calculateOptimalThreshold(data, info);
+    // Анализируем пиксели и считаем частоту цветов
+    for (let i = 0; i < data.length; i += info.channels) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      
+      // Группируем похожие цвета (квантизация)
+      const quantizedR = Math.round(r / 32) * 32;
+      const quantizedG = Math.round(g / 32) * 32;
+      const quantizedB = Math.round(b / 32) * 32;
+      
+      const colorKey = `${quantizedR},${quantizedG},${quantizedB}`;
+      const count = colorMap.get(colorKey) || 0;
+      colorMap.set(colorKey, count + 1);
     }
     
-    // Параметры potrace как в Adobe Illustrator
+    // Сортируем цвета по частоте использования
+    const sortedColors = Array.from(colorMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, maxColors)
+      .map(([colorKey, count]) => {
+        const [r, g, b] = colorKey.split(',').map(Number);
+        return {
+          r, g, b,
+          hex: `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`,
+          count
+        };
+      });
+    
+    return sortedColors;
+    
+  } catch (error) {
+    console.error('Ошибка извлечения цветов:', error);
+    // Возвращаем базовые цвета
+    return [
+      { r: 0, g: 0, b: 0, hex: '#000000', count: 1 },
+      { r: 255, g: 255, b: 255, hex: '#ffffff', count: 1 }
+    ];
+  }
+}
+
+/**
+ * Создание цветовой маски для конкретного цвета
+ */
+async function createColorMask(imageBuffer, targetColor, settings) {
+  const sharp = require('sharp');
+  
+  try {
+    const { data, info } = await sharp(imageBuffer)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    
+    const maskData = Buffer.alloc(data.length);
+    const tolerance = 40; // Допуск для схожих цветов
+    
+    // Создаем маску для целевого цвета
+    for (let i = 0; i < data.length; i += info.channels) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      
+      // Проверяем, близок ли цвет к целевому
+      const colorDistance = Math.sqrt(
+        Math.pow(r - targetColor.r, 2) +
+        Math.pow(g - targetColor.g, 2) +
+        Math.pow(b - targetColor.b, 2)
+      );
+      
+      if (colorDistance <= tolerance) {
+        // Белый пиксель (область цвета)
+        maskData[i] = 255;
+        maskData[i + 1] = 255;
+        maskData[i + 2] = 255;
+      } else {
+        // Черный пиксель (фон)
+        maskData[i] = 0;
+        maskData[i + 1] = 0;
+        maskData[i + 2] = 0;
+      }
+    }
+    
+    // Создаем изображение из маски
+    const maskBuffer = await sharp(maskData, {
+      raw: {
+        width: info.width,
+        height: info.height,
+        channels: info.channels
+      }
+    })
+    .png()
+    .toBuffer();
+    
+    return maskBuffer;
+    
+  } catch (error) {
+    console.error('Ошибка создания цветовой маски:', error);
+    return null;
+  }
+}
+
+/**
+ * Векторизация цветового слоя
+ */
+async function vectorizeColorLayer(maskBuffer, color, settings) {
+  const potrace = require('potrace');
+  
+  try {
     const potraceParams = {
-      threshold: typeof threshold === 'number' ? threshold : 128,
-      turdSize: settings.turdSize || 2,
+      threshold: 128,
+      turdSize: settings.turdSize || 1,
       turnPolicy: settings.turnPolicy || 'black',
       alphaMax: settings.alphaMax || 1.0,
       optCurve: settings.optiCurve !== false,
-      optTolerance: settings.optTolerance || 0.2
+      optTolerance: settings.optTolerance || 0.05
     };
     
-    console.log('📊 Параметры Adobe Illustrator трассировки:', potraceParams);
-    
-    // Векторизация через potrace
     return new Promise((resolve, reject) => {
-      potrace.trace(imageBuffer, potraceParams, (err, svg) => {
+      potrace.trace(maskBuffer, potraceParams, (err, svg) => {
         if (err) {
-          reject(new Error(`Ошибка potrace: ${err.message}`));
+          console.error(`Ошибка векторизации цвета ${color.hex}:`, err);
+          resolve(null);
         } else {
-          console.log('✅ SVG создан в стиле Adobe Illustrator');
           resolve(svg);
         }
       });
     });
     
   } catch (error) {
-    console.error('Ошибка создания Adobe Style SVG:', error);
+    console.error('Ошибка векторизации слоя:', error);
+    return null;
+  }
+}
+
+/**
+ * Извлечение путей из SVG
+ */
+function extractSVGPaths(svgContent) {
+  const pathRegex = /<path[^>]*d="([^"]*)"[^>]*>/g;
+  const paths = [];
+  let match;
+  
+  while ((match = pathRegex.exec(svgContent)) !== null) {
+    paths.push(match[1]);
+  }
+  
+  return paths;
+}
+
+/**
+ * Объединение цветных слоев в финальный SVG
+ */
+async function combineColorLayers(colorLayers, originalImageBuffer) {
+  const sharp = require('sharp');
+  
+  try {
+    // Получаем размеры оригинального изображения
+    const metadata = await sharp(originalImageBuffer).metadata();
+    const width = metadata.width;
+    const height = metadata.height;
+    
+    let svgContent = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+  <title>Шелкография (${colorLayers.length} цветов)</title>
+  <desc>Векторизация с сохранением цветов для печати</desc>
+`;
+    
+    // Добавляем каждый цветной слой
+    colorLayers.forEach((layer, index) => {
+      svgContent += `  <g id="color-layer-${index + 1}" fill="${layer.color}" stroke="none">\n`;
+      
+      layer.paths.forEach((path, pathIndex) => {
+        if (path && path.trim()) {
+          svgContent += `    <path d="${path}" />\n`;
+        }
+      });
+      
+      svgContent += `  </g>\n`;
+    });
+    
+    svgContent += `</svg>`;
+    
+    return svgContent;
+    
+  } catch (error) {
+    console.error('Ошибка объединения слоев:', error);
+    return createMonochromeBackup(originalImageBuffer, { threshold: 128 });
+  }
+}
+
+/**
+ * Резервный монохромный SVG при ошибках
+ */
+async function createMonochromeBackup(imageBuffer, settings) {
+  const potrace = require('potrace');
+  
+  console.log('🔄 Создание резервного монохромного SVG...');
+  
+  try {
+    const potraceParams = {
+      threshold: settings.threshold || 128,
+      turdSize: 1,
+      turnPolicy: 'black',
+      alphaMax: 1.0,
+      optCurve: true,
+      optTolerance: 0.05
+    };
+    
+    return new Promise((resolve, reject) => {
+      potrace.trace(imageBuffer, potraceParams, (err, svg) => {
+        if (err) {
+          reject(new Error(`Ошибка резервного potrace: ${err.message}`));
+        } else {
+          console.log('✅ Резервный SVG создан');
+          resolve(svg);
+        }
+      });
+    });
+    
+  } catch (error) {
+    console.error('Критическая ошибка создания SVG:', error);
     throw error;
   }
 }
@@ -1305,6 +1540,11 @@ module.exports = {
   preprocessImageForSilkscreen,
   quantizeColorsAI,
   createSilkscreenSVG,
+  extractDominantColors,
+  createColorMask,
+  vectorizeColorLayer,
+  combineColorLayers,
+  createMonochromeBackup,
   optimizeSVGSize,
   detectContentType,
   generatePreviews,
