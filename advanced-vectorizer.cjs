@@ -249,79 +249,159 @@ async function createSilkscreenSVG(imageBuffer, settings) {
 }
 
 /**
- * Упрощенное извлечение доминирующих цветов - ИСПРАВЛЕННАЯ ВЕРСИЯ
+ * K-means кластеризация для извлечения контрастных цветов
  */
 async function extractDominantColors(imageBuffer, maxColors = 5) {
   const sharp = require('sharp');
   
   try {
-    // Используем квантизованное изображение напрямую
-    const quantizedBuffer = await sharp(imageBuffer)
-      .png({
-        palette: true,
-        colors: maxColors,
-        dither: 0.5
-      })
-      .toBuffer();
+    console.log(`🎨 [COLOR EXTRACTION] Начало извлечения ${maxColors} доминирующих цветов`);
     
-    // Анализируем квантизованное изображение
-    const { data, info } = await sharp(quantizedBuffer)
-      .resize(50, 50, { fit: 'inside' })
+    // Уменьшаем изображение для быстрого анализа
+    const { data, info } = await sharp(imageBuffer)
+      .resize(100, 100, { fit: 'inside' })
       .raw()
       .toBuffer({ resolveWithObject: true });
     
-    const colorMap = new Map();
+    console.log(`📊 [COLOR EXTRACTION] Анализ изображения ${info.width}x${info.height}, ${info.channels} каналов`);
     
-    // Собираем уникальные цвета
+    // Собираем все пиксели
+    const pixels = [];
     for (let i = 0; i < data.length; i += info.channels) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
+      const alpha = info.channels === 4 ? data[i + 3] : 255;
       
-      // Пропускаем полностью прозрачные или слишком темные/светлые пиксели
-      if (info.channels === 4 && data[i + 3] < 128) continue;
-      if (r + g + b < 30 || r + g + b > 750) continue;
+      // Пропускаем прозрачные пиксели
+      if (alpha < 128) continue;
       
-      const colorKey = `${r},${g},${b}`;
-      const count = colorMap.get(colorKey) || 0;
-      colorMap.set(colorKey, count + 1);
+      pixels.push([r, g, b]);
     }
     
-    // Сортируем и возвращаем топ цвета
-    const sortedColors = Array.from(colorMap.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, maxColors)
-      .map(([colorKey, count]) => {
-        const [r, g, b] = colorKey.split(',').map(Number);
-        return {
-          r, g, b,
-          hex: `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`,
-          count
-        };
-      });
+    console.log(`🔍 [COLOR EXTRACTION] Собрано ${pixels.length} пикселей для анализа`);
     
-    console.log(`🎨 Извлечено цветов: ${sortedColors.length}`, sortedColors.map(c => c.hex));
-    
-    // Если не найдено цветов, возвращаем контрастные базовые
-    if (sortedColors.length === 0) {
-      return [
-        { r: 0, g: 0, b: 0, hex: '#000000', count: 1 },
-        { r: 255, g: 255, b: 255, hex: '#ffffff', count: 1 }
-      ];
+    if (pixels.length === 0) {
+      console.log(`⚠️ [COLOR EXTRACTION] Нет пикселей для анализа, используем fallback`);
+      return getScreenPrintingPalette();
     }
     
-    return sortedColors;
+    // K-means кластеризация
+    const clusters = performKMeans(pixels, Math.min(maxColors, pixels.length));
+    
+    // Преобразуем центроиды в цветовые объекты
+    const dominantColors = clusters.map((cluster, index) => {
+      const [r, g, b] = cluster.centroid.map(Math.round);
+      return {
+        r, g, b,
+        hex: `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`,
+        count: cluster.points.length,
+        cluster: index + 1
+      };
+    }).filter(color => color.count > 10); // Минимум 10 пикселей
+    
+    // Сортируем по количеству пикселей
+    dominantColors.sort((a, b) => b.count - a.count);
+    
+    console.log(`✅ [COLOR EXTRACTION] Извлечено ${dominantColors.length} цветов:`, 
+                dominantColors.map(c => `${c.hex}(${c.count}px)`));
+    
+    if (dominantColors.length === 0) {
+      console.log(`⚠️ [COLOR EXTRACTION] K-means не дал результатов, используем fallback`);
+      return getScreenPrintingPalette();
+    }
+    
+    return dominantColors.slice(0, maxColors);
     
   } catch (error) {
-    console.error('Ошибка извлечения цветов:', error);
-    // Возвращаем контрастную палитру для шелкографии
-    return [
-      { r: 0, g: 0, b: 0, hex: '#000000', count: 1 },
-      { r: 255, g: 0, b: 0, hex: '#ff0000', count: 1 },
-      { r: 0, g: 0, b: 255, hex: '#0000ff', count: 1 },
-      { r: 255, g: 255, b: 255, hex: '#ffffff', count: 1 }
-    ];
+    console.error('❌ [COLOR EXTRACTION] Ошибка извлечения цветов:', error);
+    return getScreenPrintingPalette();
   }
+}
+
+/**
+ * Простая K-means кластеризация для группировки цветов
+ */
+function performKMeans(points, k, maxIterations = 10) {
+  if (points.length <= k) {
+    return points.map(point => ({ centroid: point, points: [point] }));
+  }
+  
+  // Инициализируем центроиды случайно
+  let centroids = [];
+  for (let i = 0; i < k; i++) {
+    centroids.push(points[Math.floor(Math.random() * points.length)].slice());
+  }
+  
+  for (let iter = 0; iter < maxIterations; iter++) {
+    // Группируем точки по ближайшим центроидам
+    const clusters = centroids.map(() => ({ centroid: [0, 0, 0], points: [] }));
+    
+    for (const point of points) {
+      let minDistance = Infinity;
+      let closestCluster = 0;
+      
+      for (let i = 0; i < centroids.length; i++) {
+        const distance = euclideanDistance(point, centroids[i]);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestCluster = i;
+        }
+      }
+      
+      clusters[closestCluster].points.push(point);
+    }
+    
+    // Обновляем центроиды
+    let changed = false;
+    for (let i = 0; i < clusters.length; i++) {
+      if (clusters[i].points.length > 0) {
+        const newCentroid = [0, 0, 0];
+        for (const point of clusters[i].points) {
+          newCentroid[0] += point[0];
+          newCentroid[1] += point[1];
+          newCentroid[2] += point[2];
+        }
+        newCentroid[0] /= clusters[i].points.length;
+        newCentroid[1] /= clusters[i].points.length;
+        newCentroid[2] /= clusters[i].points.length;
+        
+        if (euclideanDistance(newCentroid, centroids[i]) > 1) {
+          changed = true;
+        }
+        centroids[i] = newCentroid;
+        clusters[i].centroid = newCentroid;
+      }
+    }
+    
+    if (!changed) break;
+  }
+  
+  return clusters.filter(cluster => cluster.points.length > 0);
+}
+
+/**
+ * Евклидово расстояние между двумя точками
+ */
+function euclideanDistance(point1, point2) {
+  return Math.sqrt(
+    Math.pow(point1[0] - point2[0], 2) +
+    Math.pow(point1[1] - point2[1], 2) +
+    Math.pow(point1[2] - point2[2], 2)
+  );
+}
+
+/**
+ * Контрастная палитра для шелкографии (fallback)
+ */
+function getScreenPrintingPalette() {
+  return [
+    { r: 0, g: 0, b: 0, hex: '#000000', count: 1000 },
+    { r: 255, g: 0, b: 0, hex: '#ff0000', count: 800 },
+    { r: 0, g: 0, b: 255, hex: '#0000ff', count: 600 },
+    { r: 255, g: 255, b: 0, hex: '#ffff00', count: 400 },
+    { r: 255, g: 255, b: 255, hex: '#ffffff', count: 200 }
+  ];
 }
 
 /**
