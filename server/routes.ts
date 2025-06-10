@@ -162,6 +162,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.sendFile('test-page.html', { root: '.' });
   });
   
+  // Тестовая страница команды "нужен вектор"
+  app.get('/test-vector', (req, res) => {
+    res.sendFile('test-vector-command.html', { root: '.' });
+  });
+  
   // Демо-страница генератора изображений
   app.get('/demo', (req, res) => {
     res.sendFile('demo.html', { root: '.' });

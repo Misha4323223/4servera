@@ -175,13 +175,13 @@ class SDWebUIClient {
      */
     async saveBase64Image(base64Data, filename) {
         try {
-            const outputDir = './output';
+            const outputDir = './output/images';
             await fs.mkdir(outputDir, { recursive: true });
             
             const filePath = path.join(outputDir, filename);
             await fs.writeFile(filePath, base64Data, 'base64');
             
-            return `/output/${filename}`;
+            return `/output/images/${filename}`;
         } catch (error) {
             throw new Error(`Ошибка сохранения изображения: ${error.message}`);
         }
