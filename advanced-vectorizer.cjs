@@ -90,7 +90,7 @@ async function silkscreenVectorize(imageBuffer, options = {}) {
     const colorQuantizedBuffer = await quantizeColorsAI(processedBuffer, settings.maxColors);
     
     // Векторизация с оптимальными параметрами для печати
-    const svgContent = await createSilkscreenSVG(colorQuantizedBuffer, settings);
+    const svgContent = await createColoredSVG(colorQuantizedBuffer, settings);
     
     // Проверка размера файла (ограничение 20МБ)
     const svgSize = Buffer.byteLength(svgContent, 'utf8');
