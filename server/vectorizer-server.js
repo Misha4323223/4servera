@@ -95,9 +95,6 @@ async function startVectorizerServer() {
     process.exit(1);
   }
 
-  const app = express();
-  const PORT = process.env.VECTORIZER_PORT || 3001;
-
   // Детальное логирование для диагностики
   detailedLog('🔍 Диагностика запуска векторизатора:');
   detailedLog('  ✓ Express импортирован');
@@ -167,10 +164,11 @@ async function startVectorizerServer() {
     });
   });
 
+  const app = express();
+  const PORT = process.env.VECTORIZER_PORT || 3001;
 
-
-// Настройка CORS для кросс-доменных запросов
-app.use(cors({
+  // Настройка CORS для кросс-доменных запросов
+  app.use(cors({
   origin: ['http://localhost:3001', 'http://localhost:5000', 'http://localhost:3000', /\.replit\.app$/],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
