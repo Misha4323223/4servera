@@ -19,7 +19,7 @@ const vectorizer = spawn('node', [vectorizerPath], {
   stdio: 'inherit',
   env: {
     ...process.env,
-    VECTORIZER_PORT: process.env.VECTORIZER_PORT || '5006'
+    VECTORIZER_PORT: process.env.VECTORIZER_PORT || '3001'
   }
 });
 

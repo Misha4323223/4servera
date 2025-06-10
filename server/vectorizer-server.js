@@ -12,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Асинхронная функция запуска сервера
-async function startVectorizerServer() {
+function startVectorizerServer() {
   // Импортируем готовые маршруты векторизатора с обработкой ошибок
   let vectorizerRoutes;
   try {
@@ -27,7 +27,7 @@ async function startVectorizerServer() {
   }
 
   const app = express();
-  const PORT = process.env.VECTORIZER_PORT || 5006;
+  const PORT = process.env.VECTORIZER_PORT || 3001;
 
   // Детальное логирование для диагностики
   console.log('🔍 Диагностика запуска векторизатора:');
