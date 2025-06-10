@@ -1,6 +1,6 @@
 /**
  * Standalone сервер векторизатора изображений
- * Работает на порту 5006, изолированно от основного приложения
+ * Работает на порту 3001, изолированно от основного приложения
  */
 
 import express from 'express';
@@ -177,7 +177,7 @@ async function startVectorizerServer() {
 
 // Настройка CORS для кросс-доменных запросов
 app.use(cors({
-  origin: ['http://localhost:5000', 'http://localhost:3000', /\.replit\.app$/],
+  origin: ['http://localhost:3001', 'http://localhost:5000', 'http://localhost:3000', /\.replit\.app$/],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
