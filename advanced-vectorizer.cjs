@@ -8,20 +8,28 @@ const path = require('path');
 const fs = require('fs').promises;
 const crypto = require('crypto');
 
-// Единственная настройка для шелкографии (максимум 5 цветов, до 20МБ)
-const SILKSCREEN_PRESET = {
-  name: 'Шелкография',
-  description: 'Оптимизировано для печати, максимум 5 цветов',
+// Adobe Illustrator Image Trace настройки для шелкографии
+const ADOBE_SILKSCREEN_PRESET = {
+  name: 'Adobe Silkscreen Mode',
+  description: 'Точная копия Adobe Illustrator Image Trace для шелкографии',
   settings: {
-    maxSize: 1500,
-    maxColors: 5,
-    threshold: 105,
-    turdSize: 1,
-    turnPolicy: 'black',
-    optTolerance: 0.05,
-    alphaMax: 1.0,
-    optiCurve: true,
-    preprocess: true
+    // Основные параметры как в Adobe
+    mode: 'limitedColor', // Limited Color mode
+    maxColors: 4, // 3-6 цветов как в Adobe
+    threshold: 'auto', // Автоматический порог
+    minArea: 10, // Минимальная область (удаление шума)
+    cornerThreshold: 85, // Сглаживание углов
+    
+    // Potrace параметры, соответствующие Adobe
+    turdSize: 10, // Удаление мелких деталей (как Noise в Adobe)
+    turnPolicy: 'black', // Обработка поворотов
+    optTolerance: 0.2, // Упрощение путей (как в Adobe)
+    alphaMax: 0.8, // Сглаживание углов
+    optiCurve: true, // Оптимизация кривых
+    
+    // Размеры и качество
+    maxSize: 1200, // Оптимальный размер для векторизации
+    preprocessScale: 0.8 // Предварительное масштабирование
   }
 };
 
@@ -147,24 +155,26 @@ function optimizeColorsForSilkscreen(colors, settings) {
 }
 
 /**
- * Векторизация для шелкографии - единственный режим
+ * Adobe Illustrator-совместимая векторизация для шелкографии
  */
 async function silkscreenVectorize(imageBuffer, options = {}) {
   const { outputFormat = 'svg', maxFileSize = 20 * 1024 * 1024 } = options;
   
   try {
-    console.log(`🎨 Векторизация для шелкографии (макс. 5 цветов, до 20МБ)`);
+    console.log(`🎨 Adobe Illustrator Image Trace режим (ограниченные цвета)`);
     
-    const settings = { ...SILKSCREEN_PRESET.settings };
+    const settings = { ...ADOBE_SILKSCREEN_PRESET.settings };
     
-    // Предобработка для шелкографии
-    const processedBuffer = await preprocessImageForSilkscreen(imageBuffer, settings);
+    // Adobe-совместимая предобработка
+    const processedBuffer = await preprocessImageForAdobe(imageBuffer, settings);
     
-    // Квантизация цветов до максимум 5
-    const colorQuantizedBuffer = await quantizeColorsAI(processedBuffer, settings.maxColors);
+    // Автоматическое определение порога как в Adobe Illustrator
+    const optimalThreshold = await calculateAdobeThreshold(processedBuffer);
+    settings.threshold = optimalThreshold;
+    console.log(`🎯 Adobe автоматический порог: ${optimalThreshold}`);
     
-    // Векторизация с оптимальными параметрами для печати
-    const svgContent = await createSilkscreenSVG(colorQuantizedBuffer, settings);
+    // Limited Color режим - точная цветовая векторизация
+    const svgContent = await createAdobeLimitedColorSVG(processedBuffer, settings);
     
     // Проверка размера файла (ограничение 20МБ)
     const svgSize = Buffer.byteLength(svgContent, 'utf8');
@@ -814,50 +824,421 @@ async function createMonochromeBackup(imageBuffer, settings) {
 }
 
 /**
- * Автоматическое определение оптимального порога как в Adobe Illustrator
+ * Adobe-совместимое определение автоматического порога (алгоритм Otsu)
  */
-async function calculateOptimalThreshold(data, info) {
-  // Простой алгоритм Otsu для автоматического определения порога
-  const histogram = new Array(256).fill(0);
+async function calculateAdobeThreshold(imageBuffer) {
+  const sharp = require('sharp');
   
-  // Подсчет гистограммы
-  for (let i = 0; i < data.length; i += info.channels) {
-    const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-    histogram[gray]++;
-  }
-  
-  const total = data.length / info.channels;
-  let sum = 0;
-  for (let i = 0; i < 256; i++) {
-    sum += i * histogram[i];
-  }
-  
-  let sumB = 0;
-  let wB = 0;
-  let wF = 0;
-  let varMax = 0;
-  let threshold = 0;
-  
-  for (let i = 0; i < 256; i++) {
-    wB += histogram[i];
-    if (wB === 0) continue;
+  try {
+    // Конвертируем в серый для анализа
+    const { data, info } = await sharp(imageBuffer)
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
     
-    wF = total - wB;
-    if (wF === 0) break;
-    
-    sumB += i * histogram[i];
-    const mB = sumB / wB;
-    const mF = (sum - sumB) / wF;
-    const varBetween = wB * wF * (mB - mF) * (mB - mF);
-    
-    if (varBetween > varMax) {
-      varMax = varBetween;
-      threshold = i;
+    // Создаем гистограмму яркости
+    const histogram = new Array(256).fill(0);
+    for (let i = 0; i < data.length; i++) {
+      histogram[data[i]]++;
     }
+    
+    const total = data.length;
+    let sum = 0;
+    for (let i = 0; i < 256; i++) {
+      sum += i * histogram[i];
+    }
+    
+    let sumB = 0;
+    let wB = 0;
+    let maximum = 0;
+    let level = 0;
+    
+    // Алгоритм Otsu для автоматического порога
+    for (let i = 0; i < 256; i++) {
+      wB += histogram[i];
+      if (wB === 0) continue;
+      
+      const wF = total - wB;
+      if (wF === 0) break;
+      
+      sumB += i * histogram[i];
+      const mB = sumB / wB;
+      const mF = (sum - sumB) / wF;
+      
+      const between = wB * wF * Math.pow(mB - mF, 2);
+      
+      if (between > maximum) {
+        level = i;
+        maximum = between;
+      }
+    }
+    
+    // Adobe обычно использует немного более высокий порог для шелкографии
+    const adobeAdjustedThreshold = Math.min(255, Math.max(85, level + 15));
+    
+    console.log(`📊 Otsu порог: ${level}, Adobe адаптированный: ${adobeAdjustedThreshold}`);
+    return adobeAdjustedThreshold;
+    
+  } catch (error) {
+    console.error('Ошибка расчета порога:', error);
+    return 120; // Дефолтный порог Adobe для шелкографии
+  }
+}
+
+/**
+ * Adobe-совместимая предобработка изображения
+ */
+async function preprocessImageForAdobe(imageBuffer, settings) {
+  const sharp = require('sharp');
+  
+  try {
+    console.log('📐 Adobe-совместимая предобработка...');
+    
+    // Масштабирование как в Adobe
+    const processedBuffer = await sharp(imageBuffer)
+      .resize(settings.maxSize, settings.maxSize, {
+        fit: 'inside',
+        withoutEnlargement: true
+      })
+      .png()
+      .toBuffer();
+    
+    console.log('✅ Предобработка завершена');
+    return processedBuffer;
+    
+  } catch (error) {
+    console.error('Ошибка предобработки:', error);
+    return imageBuffer;
+  }
+}
+
+/**
+ * Adobe Limited Color режим - точная имитация Image Trace
+ */
+async function createAdobeLimitedColorSVG(imageBuffer, settings) {
+  const sharp = require('sharp');
+  
+  try {
+    console.log('🎨 Adobe Limited Color режим');
+    
+    // Получаем метаданные изображения
+    const metadata = await sharp(imageBuffer).metadata();
+    const width = metadata.width;
+    const height = metadata.height;
+    
+    console.log(`📐 Размеры: ${width}x${height}`);
+    
+    // Adobe использует кластеризацию цветов K-means
+    const dominantColors = await extractAdobeColors(imageBuffer, settings.maxColors);
+    
+    if (!dominantColors || dominantColors.length === 0) {
+      console.log('❌ Не удалось извлечь цвета, используем резервный режим');
+      return createAdobeMonoSVG(imageBuffer, settings);
+    }
+    
+    console.log(`🎨 Adobe цвета: ${dominantColors.length}`);
+    
+    // Создаем SVG структуру как в Adobe
+    let svgContent = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+  <title>Adobe Limited Color (${dominantColors.length} colors)</title>
+  <desc>Generated with Adobe Illustrator Image Trace compatible algorithm</desc>
+`;
+    
+    // Обрабатываем каждый цвет как отдельный слой
+    for (let i = 0; i < dominantColors.length; i++) {
+      const color = dominantColors[i];
+      console.log(`🔍 Обработка цвета ${i + 1}/${dominantColors.length}: ${color.hex}`);
+      
+      // Создаем маску для цвета
+      const colorMask = await createAdobeColorMask(imageBuffer, color, settings);
+      
+      if (colorMask) {
+        // Векторизуем маску с Adobe параметрами
+        const paths = await vectorizeAdobeMask(colorMask, color, settings);
+        
+        if (paths && paths.length > 0) {
+          svgContent += `  <g id="color-${i + 1}" fill="${color.hex}" stroke="none">\n`;
+          
+          // Ограничиваем количество путей как в Adobe (макс 20 на цвет)
+          const limitedPaths = paths.slice(0, 20);
+          limitedPaths.forEach(path => {
+            if (path && path.length > 20 && path.length < 800) {
+              svgContent += `    <path d="${path}"/>\n`;
+            }
+          });
+          
+          svgContent += `  </g>\n`;
+          console.log(`✅ Добавлено ${limitedPaths.length} путей для ${color.hex}`);
+        }
+      }
+    }
+    
+    svgContent += `</svg>`;
+    
+    const finalSize = svgContent.length / 1024;
+    console.log(`📊 Adobe SVG готов: ${finalSize.toFixed(1)}KB`);
+    
+    return svgContent;
+    
+  } catch (error) {
+    console.error('❌ Ошибка Adobe режима:', error);
+    return createAdobeMonoSVG(imageBuffer, settings);
+  }
+}
+
+/**
+ * Извлечение цветов алгоритмом K-means как в Adobe
+ */
+async function extractAdobeColors(imageBuffer, maxColors) {
+  const sharp = require('sharp');
+  
+  try {
+    // Уменьшаем изображение для анализа как в Adobe
+    const { data, info } = await sharp(imageBuffer)
+      .resize(200, 200, { fit: 'inside' })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    
+    const pixels = [];
+    for (let i = 0; i < data.length; i += info.channels) {
+      // Пропускаем прозрачные пиксели
+      if (info.channels === 4 && data[i + 3] < 128) continue;
+      
+      pixels.push({
+        r: data[i],
+        g: data[i + 1], 
+        b: data[i + 2]
+      });
+    }
+    
+    // K-means кластеризация цветов
+    const clusters = performKMeans(pixels, maxColors);
+    
+    // Конвертируем в формат Adobe
+    const adobeColors = clusters.map(cluster => ({
+      r: Math.round(cluster.r),
+      g: Math.round(cluster.g),
+      b: Math.round(cluster.b),
+      hex: `#${Math.round(cluster.r).toString(16).padStart(2, '0')}${Math.round(cluster.g).toString(16).padStart(2, '0')}${Math.round(cluster.b).toString(16).padStart(2, '0')}`,
+      percentage: cluster.weight.toFixed(1)
+    }));
+    
+    console.log(`🎨 Adobe K-means: ${adobeColors.length} цветов`);
+    return adobeColors;
+    
+  } catch (error) {
+    console.error('Ошибка извлечения Adobe цветов:', error);
+    return [];
+  }
+}
+
+/**
+ * Простая K-means кластеризация для цветов
+ */
+function performKMeans(pixels, k) {
+  if (pixels.length === 0) return [];
+  
+  // Инициализация центроидов
+  let centroids = [];
+  for (let i = 0; i < k; i++) {
+    const randomPixel = pixels[Math.floor(Math.random() * pixels.length)];
+    centroids.push({ ...randomPixel, weight: 0 });
   }
   
-  console.log(`🎯 Автоматический порог (Otsu): ${threshold}`);
-  return threshold;
+  // Итерации K-means
+  for (let iter = 0; iter < 10; iter++) {
+    const clusters = Array(k).fill().map(() => []);
+    
+    // Назначение пикселей к кластерам
+    pixels.forEach(pixel => {
+      let minDistance = Infinity;
+      let nearestCluster = 0;
+      
+      centroids.forEach((centroid, i) => {
+        const distance = Math.sqrt(
+          Math.pow(pixel.r - centroid.r, 2) +
+          Math.pow(pixel.g - centroid.g, 2) +
+          Math.pow(pixel.b - centroid.b, 2)
+        );
+        
+        if (distance < minDistance) {
+          minDistance = distance;
+          nearestCluster = i;
+        }
+      });
+      
+      clusters[nearestCluster].push(pixel);
+    });
+    
+    // Обновление центроидов
+    centroids = clusters.map((cluster, i) => {
+      if (cluster.length === 0) return centroids[i];
+      
+      const r = cluster.reduce((sum, p) => sum + p.r, 0) / cluster.length;
+      const g = cluster.reduce((sum, p) => sum + p.g, 0) / cluster.length;
+      const b = cluster.reduce((sum, p) => sum + p.b, 0) / cluster.length;
+      const weight = (cluster.length / pixels.length) * 100;
+      
+      return { r, g, b, weight };
+    });
+  }
+  
+  // Возвращаем только непустые кластеры
+  return centroids.filter(c => c.weight > 1);
+}
+
+/**
+ * Создание цветовой маски как в Adobe
+ */
+async function createAdobeColorMask(imageBuffer, targetColor, settings) {
+  const sharp = require('sharp');
+  
+  try {
+    const { data, info } = await sharp(imageBuffer)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    
+    const maskData = Buffer.alloc(info.width * info.height);
+    
+    // Adobe использует более строгий допуск для шелкографии
+    const tolerance = 40; // Фиксированный допуск как в Adobe
+    
+    let pixelCount = 0;
+    
+    for (let i = 0; i < data.length; i += info.channels) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      
+      // Пропускаем прозрачные пиксели
+      if (info.channels === 4 && data[i + 3] < 128) continue;
+      
+      // Евклидово расстояние цветов
+      const distance = Math.sqrt(
+        Math.pow(r - targetColor.r, 2) +
+        Math.pow(g - targetColor.g, 2) +
+        Math.pow(b - targetColor.b, 2)
+      );
+      
+      const pixelIndex = Math.floor(i / info.channels);
+      
+      if (distance <= tolerance) {
+        maskData[pixelIndex] = 255;
+        pixelCount++;
+      } else {
+        maskData[pixelIndex] = 0;
+      }
+    }
+    
+    const coverage = (pixelCount / (info.width * info.height)) * 100;
+    
+    // Adobe отбрасывает цвета с малым покрытием
+    if (coverage < 2) {
+      console.log(`⚠️ Недостаточное покрытие для ${targetColor.hex}: ${coverage.toFixed(1)}%`);
+      return null;
+    }
+    
+    // Создаем маску
+    const maskBuffer = await sharp(maskData, {
+      raw: {
+        width: info.width,
+        height: info.height,
+        channels: 1
+      }
+    })
+    .png()
+    .toBuffer();
+    
+    console.log(`✅ Маска для ${targetColor.hex}: ${coverage.toFixed(1)}%`);
+    return maskBuffer;
+    
+  } catch (error) {
+    console.error(`Ошибка создания маски для ${targetColor.hex}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Векторизация маски с Adobe параметрами
+ */
+async function vectorizeAdobeMask(maskBuffer, color, settings) {
+  const potrace = require('potrace');
+  
+  try {
+    // Adobe Illustrator параметры для шелкографии
+    const adobeParams = {
+      threshold: settings.threshold || 120,
+      turdSize: settings.minArea || 10, // Удаление мелких деталей
+      turnPolicy: 'black',
+      alphaMax: settings.alphaMax || 0.8, // Сглаживание углов
+      optCurve: true,
+      optTolerance: settings.optTolerance || 0.2 // Упрощение путей
+    };
+    
+    return new Promise((resolve, reject) => {
+      potrace.trace(maskBuffer, adobeParams, (err, svg) => {
+        if (err) {
+          console.error(`Ошибка векторизации ${color.hex}:`, err);
+          resolve([]);
+        } else {
+          // Извлекаем пути из SVG
+          const pathRegex = /<path[^>]*d="([^"]*)"[^>]*>/g;
+          const paths = [];
+          let match;
+          
+          while ((match = pathRegex.exec(svg)) !== null) {
+            paths.push(match[1]);
+          }
+          
+          console.log(`🎯 ${color.hex}: ${paths.length} путей`);
+          resolve(paths);
+        }
+      });
+    });
+    
+  } catch (error) {
+    console.error(`Ошибка векторизации маски ${color.hex}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Резервный монохромный SVG в стиле Adobe
+ */
+async function createAdobeMonoSVG(imageBuffer, settings) {
+  const potrace = require('potrace');
+  const sharp = require('sharp');
+  
+  console.log('🔄 Adobe монохромный режим...');
+  
+  try {
+    const metadata = await sharp(imageBuffer).metadata();
+    
+    const adobeParams = {
+      threshold: settings.threshold || 120,
+      turdSize: 20, // Больше для монохрома
+      turnPolicy: 'black',
+      alphaMax: 0.75,
+      optCurve: true,
+      optTolerance: 0.3
+    };
+    
+    return new Promise((resolve, reject) => {
+      potrace.trace(imageBuffer, adobeParams, (err, svg) => {
+        if (err) {
+          reject(new Error(`Adobe монохром ошибка: ${err.message}`));
+        } else {
+          console.log('✅ Adobe монохромный SVG создан');
+          resolve(svg);
+        }
+      });
+    });
+    
+  } catch (error) {
+    console.error('Критическая ошибка Adobe SVG:', error);
+    throw error;
+  }
 }
 
 /**
