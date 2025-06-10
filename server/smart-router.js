@@ -267,94 +267,48 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
         try {
           const advancedVectorizer = require('../advanced-vectorizer.cjs');
           
-          // Определяем параметры из запроса
-          let quality = 'premium';
-          let formats = ['svg'];
-          let optimizeFor = 'web';
-          let generatePreviews = false;
-          
-          // Анализируем запрос для выбора режима Adobe Illustrator
-          if (queryLowerForSvg.includes('высок') || queryLowerForSvg.includes('детал') || queryLowerForSvg.includes('точн')) {
-            quality = 'high-fidelity';
-          } else if (queryLowerForSvg.includes('мало цвет') || queryLowerForSvg.includes('упрощ')) {
-            quality = 'low-color';
-          } else if (queryLowerForSvg.includes('шелкогр') || queryLowerForSvg.includes('печат')) {
-            quality = 'silkscreen';
-          } else {
-            quality = 'auto-color'; // Adobe Illustrator Auto-Color по умолчанию
-          }
-          
-          // Определяем форматы
-          if (queryLowerForSvg.includes('eps')) {
-            formats.push('eps');
-          }
-          if (queryLowerForSvg.includes('pdf')) {
-            formats.push('pdf');
-          }
-          if (queryLowerForSvg.includes('многоформат') || queryLowerForSvg.includes('все форматы')) {
-            formats = ['svg', 'eps', 'pdf'];
-          }
-          
-          // Определяем оптимизацию
-          if (queryLowerForSvg.includes('печат')) {
-            optimizeFor = 'print';
-          } else if (queryLowerForSvg.includes('лого')) {
-            optimizeFor = 'logo';
-          } else if (queryLowerForSvg.includes('икон')) {
-            optimizeFor = 'icon';
-          }
-          
-          // Отключаем превью по умолчанию для более быстрой обработки
-          generatePreviews = false;
-          
-          SmartLogger.route(`🎯 Параметры векторизации:`, {
-            quality,
-            formats,
-            optimizeFor,
-            generatePreviews
-          });
+          // Используем единственный режим шелкографии
+          SmartLogger.route('🎨 Режим: Шелкография (максимум 5 цветов, до 20МБ)');
           
           // Загружаем изображение
           const fetch = require('node-fetch');
           const response = await fetch(lastImageUrl);
           const imageBuffer = await response.buffer();
           
-          // Используем Adobe Illustrator трассировку
+          // Используем векторизацию для шелкографии
           let result;
           try {
-            SmartLogger.route(`🎨 Запуск Adobe Illustrator Image Trace (режим: ${quality})`);
+            SmartLogger.route('🎨 Запуск векторизации для шелкографии');
             
-            result = await advancedVectorizer.adobeIllustratorTrace(
+            result = await advancedVectorizer.silkscreenVectorize(
               imageBuffer,
               {
-                quality,
                 outputFormat: 'svg',
                 maxFileSize: 20 * 1024 * 1024 // 20МБ максимум
               }
             );
             
             if (!result.success) {
-              throw new Error(result.error || 'Ошибка Adobe Illustrator трассировки');
+              throw new Error(result.error || 'Ошибка векторизации');
             }
-          } catch (adobeError) {
-            SmartLogger.route('Adobe Illustrator трассировка недоступна, используем fallback');
-            // Fallback к обычной векторизации
+          } catch (vectorError) {
+            SmartLogger.route('Векторизация недоступна, используем fallback');
+            // Fallback к базовой векторизации
             result = await advancedVectorizer.vectorizeImage(
               imageBuffer,
               'user_image',
-              { quality, outputFormat: 'svg' }
+              { outputFormat: 'svg' }
             );
           }
           
           if (result.success) {
-            let responseText = `✅ **Adobe Illustrator Image Trace завершен!**\n\n`;
-            responseText += `🎨 **Режим:** ${result.quality}\n`;
+            let responseText = `✅ **Векторизация для шелкографии завершена!**\n\n`;
             responseText += `📄 **Формат:** SVG (максимум 5 цветов)\n`;
             responseText += `📏 **Размер файла:** ${(result.fileSize / 1024).toFixed(1)}KB\n`;
             if (result.optimized) {
-              responseText += `🗜️ **Оптимизирован:** Да (ограничение 20МБ)\n`;
+              responseText += `🗜️ **Оптимизирован:** до 20МБ\n`;
             }
-            responseText += `💾 **Совместимость:** Adobe Illustrator, Figma, Canva\n\n`;
+            responseText += `🎨 **Оптимизировано для печати**\n\n`;
             
             // Информация о качестве
             responseText += `📊 **Параметры обработки:**\n`;

@@ -8,67 +8,20 @@ const path = require('path');
 const fs = require('fs').promises;
 const crypto = require('crypto');
 
-// Adobe Illustrator Image Trace настройки
-const ADOBE_ILLUSTRATOR_PRESETS = {
-  'auto-color': {
-    name: 'Авто-цвет (как AI)',
-    description: 'Автоматическое определение цветов до 5 максимум',
-    settings: {
-      maxSize: 2000,
-      maxColors: 5,
-      threshold: 'auto',
-      turdSize: 2,
-      turnPolicy: 'black',
-      optTolerance: 0.2,
-      alphaMax: 1.0,
-      optiCurve: true,
-      preprocess: true
-    }
-  },
-  'high-fidelity': {
-    name: 'Высокая точность (как AI High Fidelity Photo)',
-    description: 'Максимальная детализация с 5 цветами',
-    settings: {
-      maxSize: 1800,
-      maxColors: 5,
-      threshold: 240,
-      turdSize: 1,
-      turnPolicy: 'minority',
-      optTolerance: 0.1,
-      alphaMax: 0.8,
-      optiCurve: true,
-      preprocess: true
-    }
-  },
-  'low-color': {
-    name: 'Мало цветов (как AI Low Color)',
-    description: 'Упрощенная палитра 3-5 цветов',
-    settings: {
-      maxSize: 1500,
-      maxColors: 3,
-      threshold: 180,
-      turdSize: 4,
-      turnPolicy: 'black',
-      optTolerance: 0.3,
-      alphaMax: 1.0,
-      optiCurve: true,
-      preprocess: true
-    }
-  },
-  'silkscreen': {
-    name: 'Шелкография (оптимизировано)',
-    description: 'Специально для печати, 5 цветов максимум',
-    settings: {
-      maxSize: 1500,
-      maxColors: 5,
-      threshold: 105,
-      turdSize: 1,
-      turnPolicy: 'black',
-      optTolerance: 0.05,
-      alphaMax: 1.0,
-      optiCurve: true,
-      preprocess: true
-    }
+// Единственная настройка для шелкографии (максимум 5 цветов, до 20МБ)
+const SILKSCREEN_PRESET = {
+  name: 'Шелкография',
+  description: 'Оптимизировано для печати, максимум 5 цветов',
+  settings: {
+    maxSize: 1500,
+    maxColors: 5,
+    threshold: 105,
+    turdSize: 1,
+    turnPolicy: 'black',
+    optTolerance: 0.05,
+    alphaMax: 1.0,
+    optiCurve: true,
+    preprocess: true
   }
 };
 
@@ -120,25 +73,24 @@ function detectContentType(imageBuffer) {
 }
 
 /**
- * Adobe Illustrator Image Trace - точная копия алгоритма
+ * Векторизация для шелкографии - единственный режим
  */
-async function adobeIllustratorTrace(imageBuffer, options = {}) {
-  const { quality = 'auto-color', outputFormat = 'svg', maxFileSize = 20 * 1024 * 1024 } = options;
+async function silkscreenVectorize(imageBuffer, options = {}) {
+  const { outputFormat = 'svg', maxFileSize = 20 * 1024 * 1024 } = options;
   
   try {
-    console.log(`🎨 Adobe Illustrator Image Trace: режим=${quality}`);
+    console.log(`🎨 Векторизация для шелкографии (макс. 5 цветов, до 20МБ)`);
     
-    const preset = ADOBE_ILLUSTRATOR_PRESETS[quality] || ADOBE_ILLUSTRATOR_PRESETS['auto-color'];
-    const settings = { ...preset.settings };
+    const settings = { ...SILKSCREEN_PRESET.settings };
     
-    // Предобработка как в Adobe Illustrator
-    const processedBuffer = await preprocessImageForAI(imageBuffer, settings);
+    // Предобработка для шелкографии
+    const processedBuffer = await preprocessImageForSilkscreen(imageBuffer, settings);
     
-    // Квантизация цветов до максимум 5 (как в AI)
+    // Квантизация цветов до максимум 5
     const colorQuantizedBuffer = await quantizeColorsAI(processedBuffer, settings.maxColors);
     
-    // Векторизация с Adobe Illustrator параметрами
-    const svgContent = await createAdobeStyleSVG(colorQuantizedBuffer, settings);
+    // Векторизация с оптимальными параметрами для печати
+    const svgContent = await createSilkscreenSVG(colorQuantizedBuffer, settings);
     
     // Проверка размера файла (ограничение 20МБ)
     const svgSize = Buffer.byteLength(svgContent, 'utf8');
@@ -149,10 +101,10 @@ async function adobeIllustratorTrace(imageBuffer, options = {}) {
         success: true,
         svgContent: optimizedSVG,
         settings,
-        quality: preset.name,
+        quality: SILKSCREEN_PRESET.name,
         fileSize: Buffer.byteLength(optimizedSVG, 'utf8'),
         optimized: true,
-        adobeIllustratorMode: true
+        silkscreenMode: true
       };
     }
     
@@ -160,22 +112,22 @@ async function adobeIllustratorTrace(imageBuffer, options = {}) {
       success: true,
       svgContent,
       settings,
-      quality: preset.name,
+      quality: SILKSCREEN_PRESET.name,
       fileSize: svgSize,
       optimized: false,
-      adobeIllustratorMode: true
+      silkscreenMode: true
     };
     
   } catch (error) {
-    console.error('❌ Ошибка Adobe Illustrator трассировки:', error);
-    throw new Error(`Ошибка AI трассировки: ${error.message}`);
+    console.error('❌ Ошибка векторизации для шелкографии:', error);
+    throw new Error(`Ошибка векторизации: ${error.message}`);
   }
 }
 
 /**
- * Предобработка изображения как в Adobe Illustrator
+ * Предобработка изображения для шелкографии
  */
-async function preprocessImageForAI(imageBuffer, settings) {
+async function preprocessImageForSilkscreen(imageBuffer, settings) {
   const sharp = require('sharp');
   
   console.log('🔧 Предобработка изображения (Adobe Illustrator Style)...');
@@ -247,9 +199,9 @@ async function quantizeColorsAI(imageBuffer, maxColors = 5) {
 }
 
 /**
- * Создание SVG в стиле Adobe Illustrator
+ * Создание SVG для шелкографии
  */
-async function createAdobeStyleSVG(imageBuffer, settings) {
+async function createSilkscreenSVG(imageBuffer, settings) {
   const sharp = require('sharp');
   const potrace = require('potrace');
   
@@ -387,9 +339,9 @@ async function optimizeSVGSize(svgContent, maxSize) {
   return optimized;
 }
 
-// Обратная совместимость
+// Главная функция векторизации (только шелкография)
 async function advancedVectorize(imageBuffer, options = {}) {
-  return await adobeIllustratorTrace(imageBuffer, options);
+  return await silkscreenVectorize(imageBuffer, options);
 }
 
 /**
@@ -1343,16 +1295,16 @@ async function vectorizeFromUrl(imageUrl, options = {}) {
   }
 }
 
-// Экспорт всех функций для интеграции в основной чат
+// Экспорт функций для шелкографии
 module.exports = {
   vectorizeImage,
   vectorizeFromUrl,
   batchVectorize,
-  adobeIllustratorTrace,
+  silkscreenVectorize,
   advancedVectorize,
-  preprocessImageForAI,
+  preprocessImageForSilkscreen,
   quantizeColorsAI,
-  createAdobeStyleSVG,
+  createSilkscreenSVG,
   optimizeSVGSize,
   detectContentType,
   generatePreviews,
