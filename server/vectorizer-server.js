@@ -35,6 +35,8 @@ function logError(message, error = null) {
     logEntry += `[${timestamp}] [ERROR] Stack: ${error.stack}\n`;
     logEntry += `[${timestamp}] [ERROR] Message: ${error.message}\n`;
     logEntry += `[${timestamp}] [ERROR] Type: ${error.constructor.name}\n`;
+    logEntry += `[${timestamp}] [ERROR] Code: ${error.code}\n`;
+    logEntry += `[${timestamp}] [ERROR] Errno: ${error.errno}\n`;
   }
   
   logStream.write(logEntry);
@@ -42,6 +44,35 @@ function logError(message, error = null) {
   if (error) {
     console.error('Stack:', error.stack);
   }
+}
+
+// Глубокая диагностика системы
+function logSystemState(reason = 'periodic') {
+  const timestamp = new Date().toISOString();
+  const mem = process.memoryUsage();
+  const handles = process._getActiveHandles();
+  const requests = process._getActiveRequests();
+  
+  let logEntry = `[${timestamp}] [SYSTEM] === SYSTEM STATE (${reason}) ===\n`;
+  logEntry += `[${timestamp}] [SYSTEM] PID: ${process.pid}\n`;
+  logEntry += `[${timestamp}] [SYSTEM] Uptime: ${process.uptime()}s\n`;
+  logEntry += `[${timestamp}] [SYSTEM] Memory RSS: ${Math.round(mem.rss/1024/1024)}MB\n`;
+  logEntry += `[${timestamp}] [SYSTEM] Memory HeapUsed: ${Math.round(mem.heapUsed/1024/1024)}MB\n`;
+  logEntry += `[${timestamp}] [SYSTEM] Memory HeapTotal: ${Math.round(mem.heapTotal/1024/1024)}MB\n`;
+  logEntry += `[${timestamp}] [SYSTEM] Memory External: ${Math.round(mem.external/1024/1024)}MB\n`;
+  logEntry += `[${timestamp}] [SYSTEM] Active Handles: ${handles.length}\n`;
+  logEntry += `[${timestamp}] [SYSTEM] Active Requests: ${requests.length}\n`;
+  logEntry += `[${timestamp}] [SYSTEM] Event Loop Delay: ${process.hrtime.bigint()}\n`;
+  
+  // Детали активных handles
+  handles.forEach((handle, index) => {
+    if (handle && handle.constructor) {
+      logEntry += `[${timestamp}] [SYSTEM] Handle ${index}: ${handle.constructor.name}\n`;
+    }
+  });
+  
+  logStream.write(logEntry);
+  detailedLog(`SYSTEM STATE: PID=${process.pid}, Handles=${handles.length}, Memory=${Math.round(mem.heapUsed/1024/1024)}MB`, 'SYSTEM');
 }
 
 detailedLog('🚀 VECTORIZER SERVER STARTUP INITIATED');
@@ -73,31 +104,50 @@ async function startVectorizerServer() {
 
   // Детальное логирование всех событий процесса
   detailedLog('📝 Настройка обработчиков событий процесса...');
+  logSystemState('startup');
   
-  // Логируем все возможные события процесса
-  const processEvents = [
+  // Отслеживание ВСЕХ системных событий
+  const allProcessEvents = [
     'uncaughtException', 'unhandledRejection', 'warning', 'exit', 'beforeExit',
-    'SIGTERM', 'SIGINT', 'SIGHUP', 'SIGBREAK', 'message', 'disconnect'
+    'SIGTERM', 'SIGINT', 'SIGHUP', 'SIGBREAK', 'message', 'disconnect',
+    'multipleResolves', 'rejectionHandled'
   ];
   
-  processEvents.forEach(eventName => {
+  allProcessEvents.forEach(eventName => {
     process.on(eventName, (...args) => {
-      detailedLog(`🔔 Process Event: ${eventName}`, 'EVENT');
-      detailedLog(`   Args: ${JSON.stringify(args)}`, 'EVENT');
+      logSystemState(`event-${eventName}`);
+      detailedLog(`🔔 CRITICAL PROCESS EVENT: ${eventName}`, 'EVENT');
+      detailedLog(`   Args: ${JSON.stringify(args, null, 2)}`, 'EVENT');
+      detailedLog(`   Time: ${new Date().toISOString()}`, 'EVENT');
+      detailedLog(`   Process uptime: ${process.uptime()}s`, 'EVENT');
       
       if (eventName === 'uncaughtException') {
         const error = args[0];
-        logError('❌ КРИТИЧЕСКАЯ ОШИБКА - uncaughtException', error);
+        logError('❌ FATAL: uncaughtException detected', error);
+        logSystemState('uncaughtException');
         process.exit(1);
       }
       
       if (eventName === 'unhandledRejection') {
         const [reason, promise] = args;
-        logError('❌ КРИТИЧЕСКАЯ ОШИБКА - unhandledRejection: ' + reason);
+        logError('❌ FATAL: unhandledRejection detected: ' + reason);
+        logSystemState('unhandledRejection');
         if (reason instanceof Error) {
-          logError('   Rejection stack', reason);
+          logError('   Rejection details', reason);
         }
         process.exit(1);
+      }
+      
+      if (eventName === 'exit') {
+        logSystemState('process-exit');
+        detailedLog(`🚪 PROCESS EXIT CODE: ${args[0]}`, 'EXIT');
+        detailedLog(`   Exit reason: Normal termination or forced exit`, 'EXIT');
+      }
+      
+      if (eventName === 'beforeExit') {
+        logSystemState('before-exit');
+        detailedLog(`🚪 BEFORE EXIT CODE: ${args[0]}`, 'EXIT');
+        detailedLog(`   Event loop empty, process about to exit`, 'EXIT');
       }
       
       if (eventName === 'warning') {
@@ -225,37 +275,51 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`📁 Output files: http://localhost:${PORT}/output`);
   console.log(`⏰ Время запуска: ${new Date().toISOString()}`);
   
-  // Интенсивная проверка состояния (каждые 2 секунды)
+  // Интенсивная проверка состояния с глубокой диагностикой
   const healthInterval = setInterval(() => {
     try {
+      logSystemState('heartbeat');
+      
       const memUsage = process.memoryUsage();
       const uptime = process.uptime();
       const handles = process._getActiveHandles();
       const requests = process._getActiveRequests();
       
-      console.log(`💓 Heartbeat ${new Date().toISOString()}`);
-      console.log(`   Memory: ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`);
-      console.log(`   Uptime: ${Math.round(uptime)}s`);
-      console.log(`   Active handles: ${handles.length}`);
-      console.log(`   Active requests: ${requests.length}`);
-      console.log(`   Server listening: ${server.listening}`);
-      console.log(`   PID: ${process.pid}`);
+      detailedLog(`💓 HEARTBEAT: Uptime=${Math.round(uptime)}s, Memory=${Math.round(memUsage.heapUsed / 1024 / 1024)}MB, Handles=${handles.length}`, 'HEARTBEAT');
       
-      // Детальная проверка состояния сервера
+      // Критическая проверка состояния сервера
       if (!server.listening) {
-        console.error('❌ КРИТИЧНО: Сервер больше не слушает на порту!');
-        console.error('   Server state:', server.readyState);
+        logError('❌ CRITICAL: Server no longer listening!');
+        detailedLog(`   Server address: ${JSON.stringify(server.address())}`, 'CRITICAL');
+        detailedLog(`   Server connections: ${server.connections || 'unknown'}`, 'CRITICAL');
+        logSystemState('server-not-listening');
         clearInterval(healthInterval);
       }
       
-      // Проверяем event loop
+      // Проверка утечек памяти
+      if (memUsage.heapUsed > 100 * 1024 * 1024) { // 100MB
+        detailedLog(`⚠️ HIGH MEMORY USAGE: ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`, 'WARN');
+      }
+      
+      // Проверка event loop
       if (handles.length === 0 && requests.length === 0) {
-        console.warn('⚠️ Event loop почти пуст - добавляем keep-alive задачи');
+        detailedLog('⚠️ EVENT LOOP NEARLY EMPTY - critical state detected', 'WARN');
+        logSystemState('empty-event-loop');
+      }
+      
+      // Проверка аномалий в количестве handles
+      if (handles.length > 10) {
+        detailedLog(`⚠️ HIGH HANDLE COUNT: ${handles.length}`, 'WARN');
+        handles.forEach((handle, i) => {
+          if (handle && handle.constructor) {
+            detailedLog(`   Handle ${i}: ${handle.constructor.name}`, 'HANDLE');
+          }
+        });
       }
       
     } catch (error) {
-      console.error('❌ КРИТИЧЕСКАЯ ошибка в heartbeat:', error.message);
-      console.error('   Stack:', error.stack);
+      logError('❌ CRITICAL heartbeat error', error);
+      logSystemState('heartbeat-error');
     }
   }, 2000);
   
@@ -310,43 +374,66 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   });
 });
 
-// Детальное логирование событий сервера
-server.on('error', (error) => {
-  console.error('❌ КРИТИЧЕСКАЯ ОШИБКА СЕРВЕРА:', error.message);
-  console.error('   Error code:', error.code);
-  console.error('   Error type:', error.constructor.name);
-  console.error('   Time:', new Date().toISOString());
-  console.error('   Stack:', error.stack);
-  
-  if (error.code === 'EADDRINUSE') {
-    console.error(`   Порт ${PORT} уже используется другим процессом`);
-  } else if (error.code === 'EACCES') {
-    console.error(`   Нет доступа к порту ${PORT}`);
-  }
-});
+// Глубокое отслеживание событий HTTP сервера
+const serverEvents = ['error', 'close', 'connection', 'listening', 'request', 'upgrade', 'connect'];
 
-server.on('close', () => {
-  console.log(`🛑 Сервер закрыт в: ${new Date().toISOString()}`);
-  if (server.healthInterval) {
-    clearInterval(server.healthInterval);
-    console.log('🧹 Health interval очищен');
-  }
-});
-
-server.on('connection', (socket) => {
-  console.log(`🔗 Новое соединение: ${new Date().toISOString()}`);
-  
-  socket.on('error', (error) => {
-    console.error('❌ Ошибка сокета:', error.message);
-    console.error('   Time:', new Date().toISOString());
-  });
-  
-  socket.on('close', (hadError) => {
-    console.log(`🔌 Сокет закрыт: ${new Date().toISOString()}, had error: ${hadError}`);
-  });
-  
-  socket.on('timeout', () => {
-    console.warn('⏰ Socket timeout:', new Date().toISOString());
+serverEvents.forEach(eventName => {
+  server.on(eventName, (...args) => {
+    logSystemState(`server-${eventName}`);
+    detailedLog(`🌐 SERVER EVENT: ${eventName}`, 'SERVER');
+    
+    if (eventName === 'error') {
+      const error = args[0];
+      logError('❌ CRITICAL SERVER ERROR', error);
+      logSystemState('server-error');
+      
+      if (error.code === 'EADDRINUSE') {
+        detailedLog(`   PORT ${PORT} already in use by another process`, 'SERVER');
+      } else if (error.code === 'EACCES') {
+        detailedLog(`   Access denied to port ${PORT}`, 'SERVER');
+      }
+    }
+    
+    if (eventName === 'close') {
+      detailedLog(`🛑 SERVER CLOSED at ${new Date().toISOString()}`, 'SERVER');
+      logSystemState('server-close');
+      if (server.healthInterval) {
+        clearInterval(server.healthInterval);
+        detailedLog('🧹 Health interval cleared', 'SERVER');
+      }
+      if (server.keepAliveInterval) {
+        clearInterval(server.keepAliveInterval);
+        detailedLog('🧹 Keep-alive interval cleared', 'SERVER');
+      }
+    }
+    
+    if (eventName === 'listening') {
+      detailedLog(`✅ SERVER LISTENING on port ${PORT}`, 'SERVER');
+      logSystemState('server-listening');
+    }
+    
+    if (eventName === 'connection') {
+      const socket = args[0];
+      detailedLog(`🔗 NEW CONNECTION established`, 'NETWORK');
+      
+      // Отслеживание событий сокета
+      const socketEvents = ['error', 'close', 'timeout', 'end', 'drain', 'data'];
+      socketEvents.forEach(sockEvent => {
+        socket.on(sockEvent, (...sockArgs) => {
+          detailedLog(`🔌 SOCKET EVENT: ${sockEvent}`, 'SOCKET');
+          
+          if (sockEvent === 'error') {
+            const sockError = sockArgs[0];
+            logError('❌ Socket error detected', sockError);
+          }
+          
+          if (sockEvent === 'close') {
+            const hadError = sockArgs[0];
+            detailedLog(`🔌 Socket closed, hadError: ${hadError}`, 'SOCKET');
+          }
+        });
+      });
+    }
   });
 });
 
