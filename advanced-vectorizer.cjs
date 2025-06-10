@@ -185,7 +185,7 @@ async function silkscreenVectorize(imageBuffer, options = {}) {
         success: true,
         svgContent: optimizedSVG,
         settings,
-        quality: SILKSCREEN_PRESET.name,
+        quality: ADOBE_SILKSCREEN_PRESET.name,
         fileSize: Buffer.byteLength(optimizedSVG, 'utf8'),
         optimized: true,
         silkscreenMode: true
@@ -196,7 +196,7 @@ async function silkscreenVectorize(imageBuffer, options = {}) {
       success: true,
       svgContent,
       settings,
-      quality: SILKSCREEN_PRESET.name,
+      quality: ADOBE_SILKSCREEN_PRESET.name,
       fileSize: svgSize,
       optimized: false,
       silkscreenMode: true
