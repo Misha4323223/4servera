@@ -954,23 +954,33 @@ async function createAdobeLimitedColorSVG(imageBuffer, settings) {
       const colorMask = await createAdobeColorMask(imageBuffer, color, settings);
       
       if (colorMask) {
+        console.log(`🎨 Обрабатываем цвет ${i + 1}/${adobeColors.length}: ${color.hex}`);
+        
         // Векторизуем маску с Adobe параметрами
         const paths = await vectorizeAdobeMask(colorMask, color, settings);
+        console.log(`🔍 Получено путей для ${color.hex}: ${paths ? paths.length : 0}`);
         
         if (paths && paths.length > 0) {
           svgContent += `  <g id="color-${i + 1}" fill="${color.hex}" stroke="none">\n`;
           
           // Ограничиваем количество путей как в Adobe (макс 20 на цвет)
           const limitedPaths = paths.slice(0, 20);
+          let addedPaths = 0;
+          
           limitedPaths.forEach(path => {
-            if (path && path.length > 20 && path.length < 800) {
+            if (path && path.length > 10) { // Убираем верхний лимит - Adobe не ограничивает длину путей
               svgContent += `    <path d="${path}"/>\n`;
+              addedPaths++;
             }
           });
           
           svgContent += `  </g>\n`;
-          console.log(`✅ Добавлено ${limitedPaths.length} путей для ${color.hex}`);
+          console.log(`✅ Добавлено ${addedPaths} путей для ${color.hex} (из ${limitedPaths.length} обработанных)`);
+        } else {
+          console.log(`❌ Нет путей для ${color.hex}`);
         }
+      } else {
+        console.log(`❌ Маска не создана для ${color.hex}`);
       }
     }
     
@@ -1177,21 +1187,26 @@ async function vectorizeAdobeMask(maskBuffer, color, settings) {
     };
     
     return new Promise((resolve, reject) => {
+      console.log(`🔧 Начинаем векторизацию ${color.hex} с параметрами:`, adobeParams);
+      
       potrace.trace(maskBuffer, adobeParams, (err, svg) => {
         if (err) {
-          console.error(`Ошибка векторизации ${color.hex}:`, err);
+          console.error(`❌ Ошибка векторизации ${color.hex}:`, err);
           resolve([]);
         } else {
+          console.log(`📄 SVG получен для ${color.hex}, длина: ${svg ? svg.length : 0}`);
+          
           // Извлекаем пути из SVG
           const pathRegex = /<path[^>]*d="([^"]*)"[^>]*>/g;
           const paths = [];
           let match;
           
           while ((match = pathRegex.exec(svg)) !== null) {
+            console.log(`✂️ Найден путь для ${color.hex}: ${match[1].substring(0, 50)}...`);
             paths.push(match[1]);
           }
           
-          console.log(`🎯 ${color.hex}: ${paths.length} путей`);
+          console.log(`🎯 ${color.hex}: ${paths.length} путей извлечено`);
           resolve(paths);
         }
       });
