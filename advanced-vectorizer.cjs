@@ -1242,6 +1242,110 @@ async function createAdobeMonoSVG(imageBuffer, settings) {
 }
 
 /**
+ * Векторизация изображения по URL с обработкой редиректов
+ */
+async function vectorizeFromUrl(imageUrl, options = {}) {
+  const https = require('https');
+  const http = require('http');
+  const fs = require('fs').promises;
+  
+  try {
+    console.log(`🌐 Загрузка изображения по URL...`);
+    
+    // Загружаем изображение с обработкой редиректов
+    const imageBuffer = await downloadImageWithRedirects(imageUrl);
+    
+    if (!imageBuffer) {
+      throw new Error('Не удалось загрузить изображение');
+    }
+    
+    console.log(`✅ Изображение загружено: ${(imageBuffer.length / 1024).toFixed(1)}KB`);
+    
+    // Векторизуем загруженное изображение
+    const result = await silkscreenVectorize(imageBuffer, options);
+    
+    if (result.success) {
+      // Сохраняем SVG файл
+      const filename = `vectorized_${generateId()}.svg`;
+      const filepath = path.join(outputDir, filename);
+      
+      await fs.writeFile(filepath, result.svgContent);
+      
+      return {
+        success: true,
+        svgContent: result.svgContent,
+        filename: filename,
+        detectedType: 'url-image',
+        quality: result.quality,
+        optimization: result.optimization
+      };
+    } else {
+      throw new Error(result.error || 'Ошибка векторизации');
+    }
+    
+  } catch (error) {
+    console.error('❌ Ошибка векторизации URL:', error.message);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Загрузка изображения с обработкой редиректов
+ */
+async function downloadImageWithRedirects(url, maxRedirects = 5) {
+  return new Promise((resolve, reject) => {
+    const downloadImage = (currentUrl, redirectCount = 0) => {
+      if (redirectCount > maxRedirects) {
+        reject(new Error('Слишком много редиректов'));
+        return;
+      }
+      
+      const urlObj = new URL(currentUrl);
+      const client = urlObj.protocol === 'https:' ? https : http;
+      
+      const request = client.get(currentUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8'
+        },
+        timeout: 30000
+      }, (response) => {
+        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+          console.log(`🔄 Редирект ${response.statusCode}: ${response.headers.location}`);
+          downloadImage(response.headers.location, redirectCount + 1);
+          return;
+        }
+        
+        if (response.statusCode !== 200) {
+          reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+          return;
+        }
+        
+        const chunks = [];
+        response.on('data', chunk => chunks.push(chunk));
+        response.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          console.log(`✅ Изображение загружено: ${(buffer.length / 1024).toFixed(1)}KB`);
+          resolve(buffer);
+        });
+        response.on('error', reject);
+      });
+      
+      request.on('error', reject);
+      request.on('timeout', () => {
+        request.destroy();
+        reject(new Error('Timeout при загрузке изображения'));
+      });
+    };
+    
+    downloadImage(url);
+  });
+}
+
+/**
  * Оптимизация размера SVG до 20МБ
  */
 async function optimizeSVGSize(svgContent, maxSize) {
@@ -2284,6 +2388,8 @@ module.exports = {
   multiFormatVectorize,
   optimizeForUsage,
   professionalVectorize,
+  vectorizeFromUrl,
+  silkscreenVectorize,
   ADOBE_SILKSCREEN_PRESET,
   OUTPUT_FORMATS,
   CONTENT_TYPES
