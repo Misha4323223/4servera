@@ -129,28 +129,71 @@ async function createRealSVG(imageBuffer, settings) {
       throw new Error(`Невалидные размеры изображения: ${originalWidth}x${originalHeight}`);
     }
     
-    // Определяем размеры для векторизации
-    const maxSize = settings.maxSize || 800;
+    // Определяем размеры для векторизации - увеличиваем для шелкографии
+    const maxSize = settings.maxSize || 1200; // Увеличено для лучшей детализации
     let targetWidth = originalWidth;
     let targetHeight = originalHeight;
     
+    // Для шелкографии предпочитаем высокое разрешение
+    const isHighQuality = settings.quality === 'ultra' || settings.quality === 'silkscreen';
+    const actualMaxSize = isHighQuality ? 1500 : maxSize;
+    
     // Масштабируем если изображение слишком большое
-    if (originalWidth > maxSize || originalHeight > maxSize) {
-      const scale = Math.min(maxSize / originalWidth, maxSize / originalHeight);
+    if (originalWidth > actualMaxSize || originalHeight > actualMaxSize) {
+      const scale = Math.min(actualMaxSize / originalWidth, actualMaxSize / originalHeight);
       targetWidth = Math.round(originalWidth * scale);
       targetHeight = Math.round(originalHeight * scale);
+    }
+    
+    // Минимальный размер для качественной векторизации
+    const minSize = 400;
+    if (targetWidth < minSize && targetHeight < minSize) {
+      const scale = Math.max(minSize / targetWidth, minSize / targetHeight);
+      targetWidth = Math.round(targetWidth * scale);
+      targetHeight = Math.round(targetHeight * scale);
     }
     
     console.log(`🖼️ Исходное изображение: ${originalWidth}x${originalHeight}`);
     console.log(`🎯 Целевое изображение: ${targetWidth}x${targetHeight}`);
     
-    // Подготавливаем изображение для potrace - простая обработка
-    console.log(`⚙️ Предобработка изображения для potrace...`);
+    // Подготавливаем изображение для шелкографии - улучшенная обработка
+    console.log(`⚙️ Предобработка изображения для шелкографии (${settings.quality})...`);
     
-    const processedBuffer = await sharp(imageBuffer)
-      .resize(targetWidth, targetHeight)
-      .png()
-      .toBuffer();
+    let processedBuffer;
+    
+    if (settings.quality === 'silkscreen' || settings.quality === 'ultra') {
+      // Специальная обработка для шелкографии
+      processedBuffer = await sharp(imageBuffer)
+        .resize(targetWidth, targetHeight, {
+          kernel: sharp.kernel.lanczos3,
+          fit: 'inside',
+          withoutEnlargement: false
+        })
+        // Увеличиваем резкость для лучших контуров
+        .sharpen({ sigma: 1.0, flat: 1.0, jagged: 2.0 })
+        // Улучшаем контраст
+        .normalize({ lower: 5, upper: 95 })
+        // Конвертируем в grayscale для лучшей трассировки
+        .grayscale()
+        // Применяем небольшое размытие для сглаживания шума
+        .blur(0.3)
+        .png({ 
+          compressionLevel: 0,
+          adaptiveFiltering: false,
+          palette: false
+        })
+        .toBuffer();
+    } else {
+      // Стандартная обработка
+      processedBuffer = await sharp(imageBuffer)
+        .resize(targetWidth, targetHeight, {
+          kernel: sharp.kernel.lanczos2,
+          fit: 'inside'
+        })
+        .normalize()
+        .png()
+        .toBuffer();
+    }
     
     console.log(`📊 Размер обработанного буфера: ${(processedBuffer.length / 1024).toFixed(1)}KB`);
     
@@ -391,55 +434,119 @@ function pointToLineDistance(point, lineStart, lineEnd) {
  * Получает настройки potrace в зависимости от качества
  */
 function getPotraceOptions(quality) {
-  // Правильные настройки для potrace - threshold должен быть числом 0-255
-  const baseOptions = {
-    threshold: 128,
-    optTolerance: 0.2,
-    turdSize: 2
-  };
-  
+  // Настройки для шелкографии - высокая детализация и точность контуров
   switch (quality) {
     case 'ultra':
       return {
-        threshold: 120,
-        turdSize: 2,
-        optTolerance: 0.2
+        threshold: 110,           // Более чувствительный порог для деталей
+        turdSize: 1,             // Минимальный размер для сохранения мелких элементов
+        optTolerance: 0.1,       // Высокая точность кривых
+        alphaMax: 1.0,           // Максимальная гладкость
+        optCurve: true,          // Оптимизация кривых
+        turnPolicy: 'minority'   // Политика поворотов для лучших контуров
       };
     case 'high':
       return {
-        threshold: 128,
-        turdSize: 4,
-        optTolerance: 0.4
+        threshold: 120,
+        turdSize: 2,
+        optTolerance: 0.15,
+        alphaMax: 1.0,
+        optCurve: true,
+        turnPolicy: 'minority'
       };
     case 'standard':
     default:
       return {
-        threshold: 140,
-        turdSize: 10,
-        optTolerance: 0.6
+        threshold: 130,
+        turdSize: 3,
+        optTolerance: 0.2,
+        alphaMax: 0.8,
+        optCurve: true,
+        turnPolicy: 'minority'
+      };
+    case 'silkscreen':          // Специальный режим для шелкографии
+      return {
+        threshold: 105,          // Очень чувствительный для захвата всех деталей
+        turdSize: 1,            // Сохраняем даже самые мелкие элементы
+        optTolerance: 0.05,     // Максимальная точность
+        alphaMax: 1.0,
+        optCurve: true,
+        turnPolicy: 'minority'
       };
   }
 }
 
 /**
- * Очищает и оптимизирует SVG
+ * Очищает и оптимизирует SVG для шелкографии
  */
 function cleanAndOptimizeSVG(svg, width, height, settings) {
   try {
-    // Добавляем метаданные и оптимизируем
-    const optimizedSVG = svg
-      .replace(/<svg[^>]*>/, `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`)
-      .replace(/<\/svg>/, `
+    // Улучшенная оптимизация для шелкографии
+    let optimizedSVG = svg;
+    
+    // Добавляем правильные размеры и viewBox
+    optimizedSVG = optimizedSVG.replace(
+      /<svg[^>]*>/,
+      `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`
+    );
+    
+    // Для шелкографии оптимизируем пути
+    if (settings.quality === 'silkscreen' || settings.quality === 'ultra') {
+      // Упрощаем очень мелкие элементы
+      optimizedSVG = optimizedSVG.replace(/d="[^"]*"/g, (match) => {
+        const path = match.slice(3, -1);
+        // Удаляем слишком короткие сегменты (меньше 2 пикселей)
+        const simplifiedPath = path.replace(/[ML]\s*[\d.-]+\s*[\d.-]+\s*(?=[ML])/g, (segment, offset, string) => {
+          const nextSegment = string.slice(offset + segment.length).match(/^[ML]\s*[\d.-]+\s*[\d.-]+/);
+          if (nextSegment) {
+            const coords1 = segment.match(/([\d.-]+)\s+([\d.-]+)/);
+            const coords2 = nextSegment[0].match(/([\d.-]+)\s+([\d.-]+)/);
+            if (coords1 && coords2) {
+              const dist = Math.sqrt(
+                Math.pow(parseFloat(coords2[1]) - parseFloat(coords1[1]), 2) +
+                Math.pow(parseFloat(coords2[2]) - parseFloat(coords1[2]), 2)
+              );
+              if (dist < 2) return ''; // Удаляем слишком короткие сегменты
+            }
+          }
+          return segment;
+        });
+        return `d="${simplifiedPath}"`;
+      });
+      
+      // Добавляем стиль для лучшего отображения при печати
+      optimizedSVG = optimizedSVG.replace(
+        /<svg([^>]*)>/,
+        `<svg$1>
+  <defs>
+    <style>
+      .silkscreen-path {
+        fill-rule: evenodd;
+        stroke-linejoin: round;
+        stroke-linecap: round;
+      }
+    </style>
+  </defs>`
+      );
+      
+      // Применяем класс к путям
+      optimizedSVG = optimizedSVG.replace(/<path/g, '<path class="silkscreen-path"');
+    }
+    
+    // Добавляем метаданные
+    const quality = settings.quality === 'silkscreen' ? 'шелкография' : settings.quality;
+    optimizedSVG = optimizedSVG.replace(/<\/svg>/, `
   <metadata>
-    <title>Векторизация через Potrace</title>
-    <description>Качество: ${settings.quality}, Размер: ${width}x${height}</description>
+    <title>Векторизация для шелкографии</title>
+    <description>Качество: ${quality}, Размер: ${width}x${height}, Оптимизировано для печати</description>
+    <keywords>silkscreen, векторизация, печать, potrace</keywords>
   </metadata>
 </svg>`);
     
     return optimizedSVG;
   } catch (error) {
     console.error('⚠️ Ошибка оптимизации SVG:', error);
-    return svg; // Возвращаем исходный SVG если оптимизация не удалась
+    return svg;
   }
 }
 
