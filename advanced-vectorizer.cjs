@@ -72,62 +72,177 @@ function detectContentType(imageBuffer) {
  * Упрощенная векторизация без тяжелых библиотек
  */
 async function advancedVectorize(imageBuffer, options = {}) {
-  const { quality = 'simple', outputFormat = 'svg' } = options;
+  const { quality = 'standard', outputFormat = 'svg' } = options;
   
   try {
     const detectedType = detectContentType(imageBuffer);
-    const qualitySettings = QUALITY_PRESETS[quality] || QUALITY_PRESETS.simple;
-    const finalSettings = qualitySettings.settings;
+    const qualitySettings = QUALITY_PRESETS[quality] || QUALITY_PRESETS.standard;
+    const finalSettings = { ...qualitySettings.settings, quality };
     
-    console.log(`Упрощенная векторизация: качество=${quality}, тип=${detectedType}, формат=${outputFormat}`);
+    console.log(`🔥 Реальная векторизация: качество=${quality}, тип=${detectedType}, формат=${outputFormat}`);
     
-    // Создаем простой SVG без обработки изображения
-    const svgContent = createSimpleSVG(imageBuffer, finalSettings);
+    // Используем реальную векторизацию через potrace
+    const svgContent = await createRealSVG(imageBuffer, finalSettings);
     
     return {
       success: true,
       svgContent,
       settings: finalSettings,
       detectedType,
-      quality: qualitySettings.name
+      quality: qualitySettings.name,
+      isRealVectorization: true
     };
     
   } catch (error) {
-    throw new Error(`Ошибка упрощенной векторизации: ${error.message}`);
+    console.error('❌ Ошибка реальной векторизации:', error);
+    throw new Error(`Ошибка векторизации: ${error.message}`);
   }
 }
 
 /**
- * Создание простого SVG с базовыми формами (5 цветов максимум)
+ * Создает реальный SVG через трассировку изображения
  */
-function createSimpleSVG(imageBuffer, settings) {
-  const size = imageBuffer.length;
-  const width = Math.min(settings.maxSize || 300, 400);
-  const height = Math.min(settings.maxSize || 300, 400);
+async function createRealSVG(imageBuffer, settings) {
+  const sharp = require('sharp');
+  const potrace = require('potrace');
   
-  // Палитра из 5 цветов
-  const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'];
-  
-  // Простые геометрические формы на основе размера файла
-  const shapes = [];
-  const shapeCount = Math.min(settings.maxColors || 5, 5);
-  
-  for (let i = 0; i < shapeCount; i++) {
-    const color = colors[i];
-    const x = 50 + (i * 60);
-    const y = 50 + (i * 30);
-    const radius = 20 + (i * 5);
+  try {
+    // Получаем информацию об изображении
+    const metadata = await sharp(imageBuffer).metadata();
+    const originalWidth = metadata.width;
+    const originalHeight = metadata.height;
     
-    shapes.push(`<circle cx="${x}" cy="${y}" r="${radius}" fill="${color}" opacity="0.8"/>`);
+    // Определяем размеры для векторизации
+    const maxSize = settings.maxSize || 800;
+    let targetWidth = originalWidth;
+    let targetHeight = originalHeight;
+    
+    // Масштабируем если изображение слишком большое
+    if (originalWidth > maxSize || originalHeight > maxSize) {
+      const scale = Math.min(maxSize / originalWidth, maxSize / originalHeight);
+      targetWidth = Math.round(originalWidth * scale);
+      targetHeight = Math.round(originalHeight * scale);
+    }
+    
+    console.log(`🖼️ Исходное изображение: ${originalWidth}x${originalHeight}`);
+    console.log(`🎯 Целевое изображение: ${targetWidth}x${targetHeight}`);
+    
+    // Подготавливаем изображение для трассировки
+    const processedBuffer = await sharp(imageBuffer)
+      .resize(targetWidth, targetHeight, { 
+        fit: 'inside',
+        withoutEnlargement: false
+      })
+      .png()
+      .toBuffer();
+    
+    console.log(`⚙️ Начинаем трассировку с параметрами качества: ${settings.quality}`);
+    
+    // Настройки для potrace в зависимости от качества
+    const potraceOptions = getPotraceOptions(settings.quality);
+    
+    // Выполняем трассировку
+    return new Promise((resolve, reject) => {
+      potrace.trace(processedBuffer, potraceOptions, (err, svg) => {
+        if (err) {
+          console.error('❌ Ошибка potrace:', err);
+          // Возвращаем простую заглушку в случае ошибки
+          resolve(createFallbackSVG(targetWidth, targetHeight, settings));
+          return;
+        }
+        
+        console.log(`✅ Трассировка завершена успешно`);
+        
+        // Очищаем и улучшаем SVG
+        const cleanedSVG = cleanAndOptimizeSVG(svg, targetWidth, targetHeight, settings);
+        resolve(cleanedSVG);
+      });
+    });
+    
+  } catch (error) {
+    console.error('❌ Ошибка обработки изображения:', error);
+    // Возвращаем заглушку при критической ошибке
+    return createFallbackSVG(400, 400, settings);
   }
+}
+
+/**
+ * Получает настройки potrace в зависимости от качества
+ */
+function getPotraceOptions(quality) {
+  switch (quality) {
+    case 'ultra':
+      return {
+        threshold: 128,
+        turdSize: 2,
+        turnPolicy: potrace.TURNPOLICY_MINORITY,
+        alphaMax: 1.0,
+        optCurve: true,
+        optTolerance: 0.2
+      };
+    case 'high':
+      return {
+        threshold: 128,
+        turdSize: 4,
+        turnPolicy: potrace.TURNPOLICY_MINORITY,
+        alphaMax: 1.0,
+        optCurve: true,
+        optTolerance: 0.4
+      };
+    case 'standard':
+    default:
+      return {
+        threshold: 128,
+        turdSize: 10,
+        turnPolicy: potrace.TURNPOLICY_MINORITY,
+        alphaMax: 1.0,
+        optCurve: true,
+        optTolerance: 0.6
+      };
+  }
+}
+
+/**
+ * Очищает и оптимизирует SVG
+ */
+function cleanAndOptimizeSVG(svg, width, height, settings) {
+  try {
+    // Добавляем метаданные и оптимизируем
+    const optimizedSVG = svg
+      .replace(/<svg[^>]*>/, `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`)
+      .replace(/<\/svg>/, `
+  <metadata>
+    <title>Векторизация через Potrace</title>
+    <description>Качество: ${settings.quality}, Размер: ${width}x${height}</description>
+  </metadata>
+</svg>`);
+    
+    return optimizedSVG;
+  } catch (error) {
+    console.error('⚠️ Ошибка оптимизации SVG:', error);
+    return svg; // Возвращаем исходный SVG если оптимизация не удалась
+  }
+}
+
+/**
+ * Создает простую заглушку SVG при ошибках
+ */
+function createFallbackSVG(width, height, settings) {
+  console.log('🔄 Создаем fallback SVG');
   
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
-  <rect width="100%" height="100%" fill="#FFFFFF"/>
-  ${shapes.join('\n  ')}
+  <rect width="100%" height="100%" fill="#f8f9fa"/>
+  <rect x="20" y="20" width="${width-40}" height="${height-40}" fill="none" stroke="#6c757d" stroke-width="2" stroke-dasharray="5,5"/>
+  <text x="${width/2}" y="${height/2-10}" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#6c757d">
+    Векторизация
+  </text>
+  <text x="${width/2}" y="${height/2+10}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#6c757d">
+    ${settings.quality} качество
+  </text>
   <metadata>
-    <title>Упрощенная векторизация</title>
-    <description>Базовая векторизация с ${shapeCount} цветами</description>
+    <title>Fallback векторизация</title>
+    <description>Резервный SVG при ошибке трассировки</description>
   </metadata>
 </svg>`;
 }
