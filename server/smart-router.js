@@ -4,6 +4,8 @@
  */
 
 const express = require('express');
+const path = require('path');
+const fs = require('fs').promises;
 const router = express.Router();
 
 // Система логирования
@@ -316,28 +318,24 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
             responseText += `• Цвета: Максимум 5\n`;
             responseText += `• Лимит размера: 20МБ\n\n`;
             
-            // Создаем файлы и ссылки для доступа
-            let downloadLinks = '';
-            let viewLinks = '';
+            // Сохраняем SVG файл для доступа
+            const crypto = require('crypto');
+            const imageId = crypto.randomBytes(8).toString('hex');
+            const filename = `vectorized_${imageId}.svg`;
+            const outputPath = path.join(__dirname, '..', 'output', 'vectorizer', filename);
             
-            if (result.main.formats && result.main.formats.length > 0) {
-              result.main.formats.forEach(format => {
-                const fileName = format.filename;
-                downloadLinks += `📥 [Скачать ${format.format.toUpperCase()}](/output/${fileName}) `;
-                viewLinks += `👁️ [Просмотр ${format.format.toUpperCase()}](/output/${fileName}) `;
-              });
+            try {
+              await fs.writeFile(outputPath, result.svgContent, 'utf8');
               
-              responseText += `📁 **Готовые файлы:**\n`;
-              responseText += `${viewLinks}\n`;
-              responseText += `${downloadLinks}\n\n`;
+              responseText += `📁 **Файл готов:**\n`;
+              responseText += `🔗 [Просмотреть SVG](/output/vectorizer/${filename})\n`;
+              responseText += `📥 [Скачать SVG](/output/vectorizer/${filename}?download=true)\n\n`;
+            } catch (writeError) {
+              console.error('Ошибка сохранения файла:', writeError);
+              responseText += `⚠️ Файл создан, но возникла проблема с сохранением\n\n`;
             }
             
-            // Краткая статистика
-            if (result.optimization && result.optimization.success) {
-              responseText += `⚡ **Статистика:** Сжатие ${result.optimization.compressionRatio}% | Размер: ${Math.round(result.optimization.optimizedSize/1024)}KB\n\n`;
-            }
-            
-            responseText += `✅ Векторизация выполнена с использованием продвинутого алгоритма`;
+            responseText += `✅ Векторизация для шелкографии завершена успешно`;
             
             return {
               success: true,

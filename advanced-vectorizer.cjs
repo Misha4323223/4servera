@@ -1312,7 +1312,7 @@ module.exports = {
   multiFormatVectorize,
   optimizeForUsage,
   professionalVectorize,
-  QUALITY_PRESETS,
+  SILKSCREEN_PRESET,
   OUTPUT_FORMATS,
   CONTENT_TYPES
 };
