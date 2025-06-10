@@ -1,0 +1,9 @@
+
+.agent_checkpoints/
+.env
+node_modules/
+dist/
+*.log
+.DS_Store
+temp/
+uploads/
