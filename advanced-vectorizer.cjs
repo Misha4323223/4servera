@@ -1298,8 +1298,20 @@ async function vectorizeFromUrl(imageUrl, options = {}) {
     
     console.log(`✅ Изображение загружено: ${(imageBuffer.length / 1024).toFixed(1)}KB`);
     
-    // Векторизуем загруженное изображение
-    const result = await silkscreenVectorize(imageBuffer, options);
+    // Принудительно используем Adobe Limited Color для команды "нужен вектор"
+    console.log(`🎨 ПРИНУДИТЕЛЬНЫЙ РЕЖИМ: Adobe Limited Color (silkscreen)`);
+    console.log(`📊 Входные параметры:`, JSON.stringify(options));
+    
+    // Принудительно устанавливаем параметры для Adobe режима
+    const adobeOptions = {
+      ...options,
+      maxColors: 5,
+      outputFormat: 'svg',
+      quality: 'silkscreen'
+    };
+    
+    console.log(`🔧 Adobe параметры:`, JSON.stringify(adobeOptions));
+    const result = await silkscreenVectorize(imageBuffer, adobeOptions);
     
     if (result.success) {
       // Сохраняем SVG файл
