@@ -97,6 +97,65 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
       'сделай svg', 'переведи в svg', 'векторный формат', 'trace', 'трейс'
     ];
     
+    // Специальная команда для прямого обращения к векторизатору на порту 5006
+    const directVectorizerKeywords = ['нужен вектор', 'векторизатор 5006', 'вектор 5006'];
+    const isDirectVectorizerRequest = directVectorizerKeywords.some(keyword => queryLowerForSvg.includes(keyword));
+    
+    // Обработка прямого запроса к векторизатору на порту 5006
+    if (isDirectVectorizerRequest && options.imageUrl) {
+      SmartLogger.route(`🎯 ПРЯМОЙ ЗАПРОС К ВЕКТОРИЗАТОРУ 5006`);
+      
+      try {
+        const fetch = require('node-fetch');
+        const FormData = require('form-data');
+        const fs = require('fs');
+        
+        // Подготавливаем данные для отправки на векторизатор
+        const form = new FormData();
+        form.append('image', fs.createReadStream(options.imageUrl));
+        form.append('quality', 'simple');
+        form.append('outputFormat', 'svg');
+        
+        const response = await fetch('http://localhost:5006/api/vectorizer/convert', {
+          method: 'POST',
+          body: form,
+          timeout: 30000
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          
+          if (result.success) {
+            const svgResponse = `✅ Векторизация завершена через сервер 5006!
+
+📄 Формат: SVG (5 цветов максимум)
+🎨 Качество: Упрощенная обработка
+📁 Файл: ${result.result.filename}
+
+🔗 Векторное изображение готово для скачивания`;
+
+            return {
+              success: true,
+              response: svgResponse,
+              provider: 'Vectorizer-5006',
+              model: 'simple-vectorizer',
+              category: 'vectorization',
+              vectorUrl: `/output/vectorizer/${result.result.filename}`,
+              svgContent: result.result.svgContent
+            };
+          }
+        }
+      } catch (error) {
+        SmartLogger.error(`Ошибка прямого обращения к векторизатору 5006:`, error);
+        return {
+          success: false,
+          response: `❌ Ошибка векторизатора на порту 5006: ${error.message}`,
+          provider: 'Vectorizer-5006',
+          error: error.message
+        };
+      }
+    }
+    
     // Новые ключевые слова для продвинутого векторизатора
     const advancedVectorKeywords = [
       'супер векторизация', 'профи качество', 'ультра svg', 'премиум векторизация',

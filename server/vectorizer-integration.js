@@ -27,6 +27,7 @@ function isVectorizationRequest(message) {
   const vectorizeKeywords = [
     'векторизуй', 'векторизация', 'в вектор', 'в svg', 'в eps', 'в pdf',
     'конвертируй в svg', 'сделай векторным', 'преобразуй в вектор',
+    'нужен вектор', 'векторизатор 5006', 'вектор 5006',
     'vectorize', 'convert to svg', 'make vector', 'to vector'
   ];
   
