@@ -385,4 +385,4 @@ router.get('/health', async (req, res) => {
 // Применяем обработчик ошибок векторизации ко всем маршрутам
 router.use(handleVectorizerError);
 
-module.exports = router;
+export default router;
