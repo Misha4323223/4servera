@@ -107,10 +107,27 @@ async function createRealSVG(imageBuffer, settings) {
   const potrace = require('potrace');
   
   try {
+    console.log(`🔍 ДИАГНОСТИКА: Начинаем анализ изображения`);
+    console.log(`📊 Размер исходного буфера: ${(imageBuffer.length / 1024).toFixed(1)}KB`);
+    
     // Получаем информацию об изображении
     const metadata = await sharp(imageBuffer).metadata();
+    console.log(`📋 Метаданные изображения:`, {
+      width: metadata.width,
+      height: metadata.height,
+      format: metadata.format,
+      channels: metadata.channels,
+      density: metadata.density,
+      hasAlpha: metadata.hasAlpha
+    });
+    
     const originalWidth = metadata.width;
     const originalHeight = metadata.height;
+    
+    // Проверяем валидность изображения
+    if (!originalWidth || !originalHeight || originalWidth < 1 || originalHeight < 1) {
+      throw new Error(`Невалидные размеры изображения: ${originalWidth}x${originalHeight}`);
+    }
     
     // Определяем размеры для векторизации
     const maxSize = settings.maxSize || 800;
@@ -127,76 +144,281 @@ async function createRealSVG(imageBuffer, settings) {
     console.log(`🖼️ Исходное изображение: ${originalWidth}x${originalHeight}`);
     console.log(`🎯 Целевое изображение: ${targetWidth}x${targetHeight}`);
     
-    // Подготавливаем изображение для трассировки
+    // Подготавливаем изображение для potrace - простая обработка
+    console.log(`⚙️ Предобработка изображения для potrace...`);
+    
     const processedBuffer = await sharp(imageBuffer)
-      .resize(targetWidth, targetHeight, { 
-        fit: 'inside',
-        withoutEnlargement: false
-      })
+      .resize(targetWidth, targetHeight)
       .png()
       .toBuffer();
+    
+    console.log(`📊 Размер обработанного буфера: ${(processedBuffer.length / 1024).toFixed(1)}KB`);
+    
+    // Проверяем что буфер не пустой
+    if (processedBuffer.length === 0) {
+      throw new Error('Обработанный буфер изображения пустой');
+    }
     
     console.log(`⚙️ Начинаем трассировку с параметрами качества: ${settings.quality}`);
     
     // Настройки для potrace в зависимости от качества
     const potraceOptions = getPotraceOptions(settings.quality);
+    console.log(`🔧 Параметры potrace:`, potraceOptions);
     
-    // Выполняем трассировку
+    // Выполняем трассировку с детальным логированием
     return new Promise((resolve, reject) => {
+      console.log(`🚀 Запускаем potrace.trace...`);
+      
       potrace.trace(processedBuffer, potraceOptions, (err, svg) => {
         if (err) {
-          console.error('❌ Ошибка potrace:', err);
-          // Возвращаем простую заглушку в случае ошибки
+          console.error('❌ ДЕТАЛЬНАЯ ОШИБКА POTRACE:');
+          console.error('   Тип ошибки:', typeof err);
+          console.error('   Сообщение:', err.message || err);
+          console.error('   Стек:', err.stack || 'нет стека');
+          console.error('   Код ошибки:', err.code || 'нет кода');
+          console.error('   Параметры potrace:', potraceOptions);
+          console.error('   Размер буфера:', processedBuffer.length);
+          
+          // Возвращаем fallback при ошибке potrace
           resolve(createFallbackSVG(targetWidth, targetHeight, settings));
           return;
         }
         
-        console.log(`✅ Трассировка завершена успешно`);
+        console.log(`✅ Трассировка potrace завершена успешно`);
+        console.log(`📏 Длина полученного SVG: ${svg ? svg.length : 0} символов`);
+        
+        if (!svg || svg.length === 0) {
+          console.error('❌ Potrace вернул пустой SVG');
+          resolve(createFallbackSVG(targetWidth, targetHeight, settings));
+          return;
+        }
         
         // Очищаем и улучшаем SVG
         const cleanedSVG = cleanAndOptimizeSVG(svg, targetWidth, targetHeight, settings);
+        console.log(`✅ SVG очищен и оптимизирован`);
         resolve(cleanedSVG);
       });
     });
     
   } catch (error) {
-    console.error('❌ Ошибка обработки изображения:', error);
+    console.error('❌ КРИТИЧЕСКАЯ ОШИБКА обработки изображения:');
+    console.error('   Сообщение:', error.message);
+    console.error('   Стек:', error.stack);
+    console.error('   Размер буфера:', imageBuffer ? imageBuffer.length : 'нет буфера');
+    
     // Возвращаем заглушку при критической ошибке
     return createFallbackSVG(400, 400, settings);
   }
 }
 
 /**
+ * Альтернативная векторизация когда potrace не работает
+ */
+async function tryAlternativeVectorization(imageBuffer, width, height, settings) {
+  const sharp = require('sharp');
+  
+  try {
+    console.log(`🔄 Альтернативная векторизация: ${width}x${height}`);
+    
+    // Получаем упрощенную версию изображения для контурного анализа
+    const { data, info } = await sharp(imageBuffer)
+      .resize(width, height, { fit: 'inside' })
+      .grayscale()
+      .threshold(128) // Бинаризация
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    
+    console.log(`📊 Данные для анализа: ${data.length} байт, ${info.width}x${info.height}`);
+    
+    // Простой алгоритм поиска контуров
+    const paths = [];
+    const visited = new Set();
+    
+    for (let y = 0; y < info.height - 1; y++) {
+      for (let x = 0; x < info.width - 1; x++) {
+        const idx = y * info.width + x;
+        
+        if (!visited.has(idx) && data[idx] < 128) { // Темный пиксель
+          const contour = traceContour(data, info.width, info.height, x, y, visited);
+          if (contour.length > 10) { // Минимальная длина контура
+            paths.push(simplifyPath(contour));
+          }
+        }
+      }
+    }
+    
+    console.log(`🎯 Найдено ${paths.length} контуров`);
+    
+    // Создаем SVG из найденных контуров
+    const pathElements = paths.slice(0, 50).map((path, i) => { // Максимум 50 контуров
+      const pathData = path.map((point, j) => 
+        j === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`
+      ).join(' ') + ' Z';
+      
+      return `<path d="${pathData}" fill="#000000" opacity="0.8"/>`;
+    }).join('\n  ');
+    
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+  ${pathElements}
+  <metadata>
+    <title>Альтернативная векторизация</title>
+    <description>Контурная векторизация, ${paths.length} объектов</description>
+  </metadata>
+</svg>`;
+    
+    console.log(`✅ Альтернативная векторизация успешна`);
+    return svg;
+    
+  } catch (error) {
+    console.error('❌ Ошибка альтернативной векторизации:', error);
+    throw error;
+  }
+}
+
+/**
+ * Трассировка контура от заданной точки
+ */
+function traceContour(data, width, height, startX, startY, visited) {
+  const contour = [];
+  const directions = [
+    [-1, -1], [0, -1], [1, -1],
+    [-1,  0],          [1,  0],
+    [-1,  1], [0,  1], [1,  1]
+  ];
+  
+  let x = startX;
+  let y = startY;
+  let steps = 0;
+  const maxSteps = Math.min(width * height, 1000); // Предотвращаем бесконечные циклы
+  
+  while (steps < maxSteps) {
+    const idx = y * width + x;
+    
+    if (visited.has(idx) || x < 0 || x >= width || y < 0 || y >= height) {
+      break;
+    }
+    
+    if (data[idx] >= 128) { // Светлый пиксель - граница контура
+      break;
+    }
+    
+    visited.add(idx);
+    contour.push({ x, y });
+    
+    // Ищем следующий темный пиксель
+    let found = false;
+    for (const [dx, dy] of directions) {
+      const nx = x + dx;
+      const ny = y + dy;
+      const nidx = ny * width + nx;
+      
+      if (nx >= 0 && nx < width && ny >= 0 && ny < height && 
+          !visited.has(nidx) && data[nidx] < 128) {
+        x = nx;
+        y = ny;
+        found = true;
+        break;
+      }
+    }
+    
+    if (!found) break;
+    steps++;
+  }
+  
+  return contour;
+}
+
+/**
+ * Упрощение пути - убираем лишние точки
+ */
+function simplifyPath(contour, tolerance = 2) {
+  if (contour.length <= 2) return contour;
+  
+  const simplified = [contour[0]];
+  
+  for (let i = 1; i < contour.length - 1; i++) {
+    const prev = contour[i - 1];
+    const curr = contour[i];
+    const next = contour[i + 1];
+    
+    // Вычисляем отклонение от прямой линии
+    const distance = pointToLineDistance(curr, prev, next);
+    
+    if (distance > tolerance) {
+      simplified.push(curr);
+    }
+  }
+  
+  simplified.push(contour[contour.length - 1]);
+  return simplified;
+}
+
+/**
+ * Расстояние от точки до линии
+ */
+function pointToLineDistance(point, lineStart, lineEnd) {
+  const A = point.x - lineStart.x;
+  const B = point.y - lineStart.y;
+  const C = lineEnd.x - lineStart.x;
+  const D = lineEnd.y - lineStart.y;
+  
+  const dot = A * C + B * D;
+  const lenSq = C * C + D * D;
+  
+  if (lenSq === 0) return Math.sqrt(A * A + B * B);
+  
+  const param = dot / lenSq;
+  
+  let xx, yy;
+  if (param < 0) {
+    xx = lineStart.x;
+    yy = lineStart.y;
+  } else if (param > 1) {
+    xx = lineEnd.x;
+    yy = lineEnd.y;
+  } else {
+    xx = lineStart.x + param * C;
+    yy = lineStart.y + param * D;
+  }
+  
+  const dx = point.x - xx;
+  const dy = point.y - yy;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
  * Получает настройки potrace в зависимости от качества
  */
 function getPotraceOptions(quality) {
+  // Базовые настройки, которые точно работают с potrace
+  const baseOptions = {
+    threshold: 'auto',
+    optTolerance: 0.2,
+    turdSize: 2
+  };
+  
   switch (quality) {
     case 'ultra':
       return {
-        threshold: 128,
+        ...baseOptions,
+        threshold: 'auto',
         turdSize: 2,
-        turnPolicy: potrace.TURNPOLICY_MINORITY,
-        alphaMax: 1.0,
-        optCurve: true,
         optTolerance: 0.2
       };
     case 'high':
       return {
-        threshold: 128,
+        ...baseOptions,
+        threshold: 'auto',
         turdSize: 4,
-        turnPolicy: potrace.TURNPOLICY_MINORITY,
-        alphaMax: 1.0,
-        optCurve: true,
         optTolerance: 0.4
       };
     case 'standard':
     default:
       return {
-        threshold: 128,
+        ...baseOptions,
+        threshold: 'auto',
         turdSize: 10,
-        turnPolicy: potrace.TURNPOLICY_MINORITY,
-        alphaMax: 1.0,
-        optCurve: true,
         optTolerance: 0.6
       };
   }
