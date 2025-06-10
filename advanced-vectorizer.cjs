@@ -73,6 +73,80 @@ function detectContentType(imageBuffer) {
 }
 
 /**
+ * Оптимизация цветов для шелкографической печати
+ * Принудительно разделяет цвета на контрастные группы
+ */
+function optimizeColorsForSilkscreen(colors, settings) {
+  console.log(`🖨️ Специальная оптимизация для шелкографии из ${colors.length} цветов`);
+  
+  if (!colors || colors.length === 0) return [];
+  
+  // Сортируем цвета по яркости для лучшего разделения
+  const sortedColors = colors.slice().sort((a, b) => {
+    const brightnessA = a.r * 0.299 + a.g * 0.587 + a.b * 0.114;
+    const brightnessB = b.r * 0.299 + b.g * 0.587 + b.b * 0.114;
+    return brightnessA - brightnessB;
+  });
+  
+  const optimizedColors = [];
+  const minColorDistance = 80; // Минимальное расстояние между цветами для печати
+  
+  for (let i = 0; i < sortedColors.length && optimizedColors.length < settings.maxColors; i++) {
+    const candidate = sortedColors[i];
+    let isDistinct = true;
+    
+    // Проверяем, достаточно ли отличается от уже выбранных цветов
+    for (const existing of optimizedColors) {
+      const distance = Math.sqrt(
+        Math.pow(candidate.r - existing.r, 2) +
+        Math.pow(candidate.g - existing.g, 2) +
+        Math.pow(candidate.b - existing.b, 2)
+      );
+      
+      if (distance < minColorDistance) {
+        isDistinct = false;
+        break;
+      }
+    }
+    
+    if (isDistinct) {
+      optimizedColors.push(candidate);
+      console.log(`✅ Цвет ${candidate.hex} добавлен (яркость: ${(candidate.r * 0.299 + candidate.g * 0.587 + candidate.b * 0.114).toFixed(0)})`);
+    } else {
+      console.log(`❌ Цвет ${candidate.hex} слишком похож на существующий`);
+    }
+  }
+  
+  // Если цветов все еще недостаточно, добавляем контрастные
+  if (optimizedColors.length < Math.min(3, settings.maxColors)) {
+    console.log(`⚠️ Добавляем контрастные цвета для улучшения печати`);
+    
+    // Добавляем черный если его нет
+    const hasBlack = optimizedColors.some(c => c.r + c.g + c.b < 100);
+    if (!hasBlack && optimizedColors.length < settings.maxColors) {
+      optimizedColors.push({
+        r: 0, g: 0, b: 0,
+        hex: '#000000',
+        percentage: '5.0'
+      });
+    }
+    
+    // Добавляем белый если его нет
+    const hasWhite = optimizedColors.some(c => c.r + c.g + c.b > 650);
+    if (!hasWhite && optimizedColors.length < settings.maxColors) {
+      optimizedColors.push({
+        r: 255, g: 255, b: 255,
+        hex: '#ffffff',
+        percentage: '5.0'
+      });
+    }
+  }
+  
+  console.log(`🎯 Финальная палитра для шелкографии: ${optimizedColors.length} цветов`);
+  return optimizedColors;
+}
+
+/**
  * Векторизация для шелкографии - единственный режим
  */
 async function silkscreenVectorize(imageBuffer, options = {}) {
@@ -218,11 +292,15 @@ async function createSilkscreenSVG(imageBuffer, settings) {
     
     console.log(`🎨 ЭТАП 3: Начинаем обработку ${dominantColors.length} цветов`);
     
+    // Специальная оптимизация для шелкографии
+    const optimizedColors = optimizeColorsForSilkscreen(dominantColors, settings);
+    console.log(`🖨️ ЭТАП 3: Оптимизировано для шелкографии: ${optimizedColors.length} цветов`);
+    
     // Создаем отдельный слой для каждого цвета
     const colorLayers = [];
     
-    for (let i = 0; i < dominantColors.length; i++) {
-      const color = dominantColors[i];
+    for (let i = 0; i < optimizedColors.length; i++) {
+      const color = optimizedColors[i];
       console.log(`\n🔍 ЭТАП 3.${i + 1}: Обрабатываем цвет ${color.hex} (${color.percentage}%)`);
       
       // Создаем маску для этого цвета
@@ -425,10 +503,10 @@ async function createColorMask(imageBuffer, targetColor, settings) {
       // Пропускаем прозрачные пиксели
       if (info.channels === 4 && data[i + 3] < 10) continue;
       
-      // Используем квантизованное сравнение (как при извлечении цветов)
-      const quantR = Math.round(r / 16) * 16;
-      const quantG = Math.round(g / 16) * 16;
-      const quantB = Math.round(b / 16) * 16;
+      // Используем мягкую квантизацию (синхронизировано с извлечением цветов)
+      const quantR = Math.round(r / 4) * 4;
+      const quantG = Math.round(g / 4) * 4;
+      const quantB = Math.round(b / 4) * 4;
       
       // Вычисляем расстояние до целевого цвета
       const deltaR = quantR - targetColor.r;
@@ -460,11 +538,21 @@ async function createColorMask(imageBuffer, targetColor, settings) {
     console.log(`   - Захвачено пикселей: ${pixelCount} (${coveragePercent}%)`);
     console.log(`   - Расстояние: мин=${minDistance.toFixed(1)}, макс=${maxDistance.toFixed(1)}`);
     
-    // Проверяем минимальное покрытие
-    const minCoverageThreshold = Math.max(0.5, parseFloat(targetColor.percentage) * 0.3);
-    if (parseFloat(coveragePercent) < minCoverageThreshold) {
+    // Улучшенная проверка минимального покрытия с учетом контрастности
+    const minCoverageThreshold = Math.max(0.8, parseFloat(targetColor.percentage) * 0.4);
+    const isSignificantColor = parseFloat(coveragePercent) >= minCoverageThreshold;
+    
+    // Дополнительная проверка для контрастных цветов (даже с малым покрытием)
+    const brightness = targetColor.r * 0.299 + targetColor.g * 0.587 + targetColor.b * 0.114;
+    const isHighContrast = brightness < 50 || brightness > 200; // Очень темные или светлые
+    
+    if (!isSignificantColor && !isHighContrast) {
       console.log(`⚠️ ЭТАП 2: Недостаточное покрытие для ${targetColor.hex} (${coveragePercent}% < ${minCoverageThreshold}%), пропускаем`);
       return null;
+    }
+    
+    if (isHighContrast && !isSignificantColor) {
+      console.log(`✨ ЭТАП 2: Сохраняем контрастный цвет ${targetColor.hex} (яркость: ${brightness.toFixed(0)})`);
     }
     
     // Создаем изображение из маски
