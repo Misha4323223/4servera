@@ -1164,6 +1164,832 @@ async function refineMasks(masks, settings = {}) {
   }
 }
 
+// ================================================================
+// ЭТАП 4: ВЕКТОРИЗАЦИЯ (Adobe Illustrator Image Trace Algorithm)
+// ================================================================
+
+/**
+ * traceContours() - Трассировка контуров (Adobe Potrace-like алгоритм)
+ * Извлекает векторные контуры из бинарных масок
+ */
+async function traceContours(masks, settings = {}) {
+  console.log(`🔍 ЭТАП 4.1: Adobe traceContours - Трассировка контуров для ${masks.length} масок...`);
+  
+  try {
+    if (!masks || masks.length === 0) {
+      throw new Error('Нет масок для трассировки контуров');
+    }
+    
+    const contours = [];
+    const turnPolicy = settings.turnPolicy || 'minority'; // Adobe стандарт
+    const turdSize = settings.turdSize || 2; // Минимальный размер области
+    
+    console.log(`   🎯 Параметры трассировки: turnPolicy=${turnPolicy}, turdSize=${turdSize}`);
+    
+    for (let maskIndex = 0; maskIndex < masks.length; maskIndex++) {
+      const mask = masks[maskIndex];
+      console.log(`   🔍 Трассировка маски ${maskIndex + 1}/${masks.length} (цвет: ${mask.color?.hex || 'unknown'})...`);
+      
+      // Adobe контурная трассировка
+      const maskContours = await traceMaskContours(mask, {
+        turnPolicy,
+        turdSize,
+        alphaMax: settings.alphaMax || 1.0  // Максимальный угол поворота
+      });
+      
+      console.log(`     ✅ Найдено ${maskContours.length} контуров`);
+      
+      contours.push({
+        maskIndex,
+        color: mask.color,
+        coverage: mask.coverage,
+        contours: maskContours,
+        totalPaths: maskContours.length
+      });
+    }
+    
+    const totalContours = contours.reduce((sum, c) => sum + c.contours.length, 0);
+    console.log(`   🎯 Общий результат: ${totalContours} контуров из ${masks.length} масок`);
+    
+    return contours;
+    
+  } catch (error) {
+    console.error('❌ Ошибка traceContours:', error);
+    return [];
+  }
+}
+
+/**
+ * traceMaskContours() - Трассировка контуров отдельной маски
+ * Реализация Adobe Potrace алгоритма
+ */
+async function traceMaskContours(mask, settings) {
+  const { maskData, width, height } = mask;
+  const { turnPolicy, turdSize, alphaMax } = settings;
+  
+  try {
+    // 1. Поиск границ объектов (Adobe edge detection)
+    const boundaries = findBoundaries(maskData, width, height);
+    console.log(`     🔍 Найдено ${boundaries.length} границ`);
+    
+    // 2. Создание контуров из границ
+    const rawContours = [];
+    
+    for (const boundary of boundaries) {
+      if (boundary.length < turdSize * 4) continue; // Фильтр мелких объектов
+      
+      // Adobe контурная трассировка
+      const contour = traceContourFromBoundary(boundary, {
+        turnPolicy,
+        alphaMax,
+        width,
+        height
+      });
+      
+      if (contour && contour.length > 0) {
+        rawContours.push(contour);
+      }
+    }
+    
+    return rawContours;
+    
+  } catch (error) {
+    console.error('❌ Ошибка traceMaskContours:', error);
+    return [];
+  }
+}
+
+/**
+ * findBoundaries() - Поиск границ объектов в маске
+ * Adobe boundary detection algorithm
+ */
+function findBoundaries(maskData, width, height) {
+  const boundaries = [];
+  const visited = new Uint8Array(width * height);
+  
+  // Moore neighborhood tracing (Adobe стандарт)
+  const directions = [
+    [-1, 0], [-1, 1], [0, 1], [1, 1],
+    [1, 0], [1, -1], [0, -1], [-1, -1]
+  ];
+  
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const index = y * width + x;
+      
+      // Поиск границы (переход от черного к белому)
+      if (maskData[index] > 0 && !visited[index]) {
+        const boundary = traceBoundaryMoore(maskData, width, height, x, y, directions, visited);
+        
+        if (boundary.length > 8) { // Минимальная длина контура
+          boundaries.push(boundary);
+        }
+      }
+    }
+  }
+  
+  return boundaries;
+}
+
+/**
+ * traceBoundaryMoore() - Moore boundary tracing алгоритм
+ * Точная реализация как в Adobe Illustrator
+ */
+function traceBoundaryMoore(maskData, width, height, startX, startY, directions, visited) {
+  const boundary = [];
+  let x = startX;
+  let y = startY;
+  let dir = 0; // Начальное направление
+  const startIndex = y * width + x;
+  
+  do {
+    boundary.push({ x, y });
+    visited[y * width + x] = 1;
+    
+    // Поиск следующей точки границы
+    let found = false;
+    for (let i = 0; i < 8; i++) {
+      const newDir = (dir + i) % 8;
+      const dx = directions[newDir][0];
+      const dy = directions[newDir][1];
+      const newX = x + dx;
+      const newY = y + dy;
+      
+      if (newX >= 0 && newX < width && newY >= 0 && newY < height) {
+        const newIndex = newY * width + newX;
+        
+        if (maskData[newIndex] > 0) {
+          x = newX;
+          y = newY;
+          dir = (newDir + 6) % 8; // Поворот налево для следующего поиска
+          found = true;
+          break;
+        }
+      }
+    }
+    
+    if (!found) break;
+    
+  } while (!(x === startX && y === startY) && boundary.length < width * height);
+  
+  return boundary;
+}
+
+/**
+ * traceContourFromBoundary() - Создание векторного контура из границы
+ * Adobe Potrace polygon approximation
+ */
+function traceContourFromBoundary(boundary, settings) {
+  const { turnPolicy, alphaMax } = settings;
+  
+  try {
+    // 1. Упрощение контура (Douglas-Peucker алгоритм)
+    const simplified = simplifyContour(boundary, 1.0); // 1 пиксель tolerance
+    
+    // 2. Определение поворотных точек
+    const corners = findCornerPoints(simplified, turnPolicy);
+    
+    // 3. Создание сегментов пути
+    const pathSegments = createPathSegments(corners, alphaMax);
+    
+    return pathSegments;
+    
+  } catch (error) {
+    console.error('❌ Ошибка traceContourFromBoundary:', error);
+    return [];
+  }
+}
+
+/**
+ * simplifyContour() - Упрощение контура (Douglas-Peucker)
+ * Adobe контурное упрощение для векторизации
+ */
+function simplifyContour(points, tolerance) {
+  if (points.length < 3) return points;
+  
+  // Douglas-Peucker recursive simplification
+  function douglasPeucker(points, start, end, tolerance) {
+    let maxDistance = 0;
+    let maxIndex = 0;
+    
+    for (let i = start + 1; i < end; i++) {
+      const distance = perpendicularDistance(points[i], points[start], points[end]);
+      if (distance > maxDistance) {
+        maxDistance = distance;
+        maxIndex = i;
+      }
+    }
+    
+    if (maxDistance > tolerance) {
+      const left = douglasPeucker(points, start, maxIndex, tolerance);
+      const right = douglasPeucker(points, maxIndex, end, tolerance);
+      return left.slice(0, -1).concat(right);
+    } else {
+      return [points[start], points[end]];
+    }
+  }
+  
+  return douglasPeucker(points, 0, points.length - 1, tolerance);
+}
+
+/**
+ * perpendicularDistance() - Расстояние от точки до линии
+ */
+function perpendicularDistance(point, lineStart, lineEnd) {
+  const dx = lineEnd.x - lineStart.x;
+  const dy = lineEnd.y - lineStart.y;
+  
+  if (dx === 0 && dy === 0) {
+    return Math.sqrt(
+      Math.pow(point.x - lineStart.x, 2) + 
+      Math.pow(point.y - lineStart.y, 2)
+    );
+  }
+  
+  const length = Math.sqrt(dx * dx + dy * dy);
+  const t = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / (length * length);
+  
+  if (t < 0) {
+    return Math.sqrt(
+      Math.pow(point.x - lineStart.x, 2) + 
+      Math.pow(point.y - lineStart.y, 2)
+    );
+  } else if (t > 1) {
+    return Math.sqrt(
+      Math.pow(point.x - lineEnd.x, 2) + 
+      Math.pow(point.y - lineEnd.y, 2)
+    );
+  }
+  
+  const projX = lineStart.x + t * dx;
+  const projY = lineStart.y + t * dy;
+  
+  return Math.sqrt(
+    Math.pow(point.x - projX, 2) + 
+    Math.pow(point.y - projY, 2)
+  );
+}
+
+/**
+ * findCornerPoints() - Поиск поворотных точек
+ * Adobe corner detection algorithm
+ */
+function findCornerPoints(points, turnPolicy) {
+  const corners = [];
+  
+  for (let i = 1; i < points.length - 1; i++) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    const next = points[i + 1];
+    
+    // Вычисление угла поворота
+    const angle1 = Math.atan2(curr.y - prev.y, curr.x - prev.x);
+    const angle2 = Math.atan2(next.y - curr.y, next.x - curr.x);
+    let angleDiff = angle2 - angle1;
+    
+    // Нормализация угла
+    if (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+    if (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+    
+    // Adobe turn policy
+    const isCorner = Math.abs(angleDiff) > Math.PI / 6; // 30 градусов threshold
+    
+    if (isCorner) {
+      corners.push({
+        point: curr,
+        angle: angleDiff,
+        index: i
+      });
+    }
+  }
+  
+  return corners;
+}
+
+/**
+ * createPathSegments() - Создание сегментов SVG пути
+ * Adobe path generation
+ */
+function createPathSegments(corners, alphaMax) {
+  const segments = [];
+  
+  if (corners.length === 0) return segments;
+  
+  for (let i = 0; i < corners.length; i++) {
+    const start = corners[i];
+    const end = corners[(i + 1) % corners.length];
+    
+    segments.push({
+      type: 'line',
+      start: start.point,
+      end: end.point,
+      length: Math.sqrt(
+        Math.pow(end.point.x - start.point.x, 2) +
+        Math.pow(end.point.y - start.point.y, 2)
+      )
+    });
+  }
+  
+  return segments;
+}
+
+/**
+ * optimizePaths() - Оптимизация векторных путей
+ * Adobe Illustrator path optimization algorithm
+ */
+async function optimizePaths(contours, settings = {}) {
+  console.log(`⚡ ЭТАП 4.2: Adobe optimizePaths - Оптимизация ${contours.length} групп контуров...`);
+  
+  try {
+    if (!contours || contours.length === 0) {
+      throw new Error('Нет контуров для оптимизации');
+    }
+    
+    const optimizedContours = [];
+    const simplifyTolerance = settings.simplifyTolerance || 1.5; // Adobe стандарт
+    const mergeThreshold = settings.mergeThreshold || 2.0; // Порог объединения путей
+    const smoothingFactor = settings.smoothingFactor || 0.5; // Фактор сглаживания
+    
+    console.log(`   🎯 Параметры оптимизации: tolerance=${simplifyTolerance}, merge=${mergeThreshold}, smooth=${smoothingFactor}`);
+    
+    for (let groupIndex = 0; groupIndex < contours.length; groupIndex++) {
+      const contourGroup = contours[groupIndex];
+      console.log(`   ⚡ Оптимизация группы ${groupIndex + 1}/${contours.length} (${contourGroup.contours.length} контуров)...`);
+      
+      // 1. Упрощение контуров
+      const simplified = simplifyContours(contourGroup.contours, simplifyTolerance);
+      
+      // 2. Объединение близких путей
+      const merged = mergeNearbyPaths(simplified, mergeThreshold);
+      
+      // 3. Сглаживание углов
+      const smoothed = smoothPaths(merged, smoothingFactor);
+      
+      // 4. Удаление вырожденных путей
+      const cleaned = removeDegenerate(smoothed);
+      
+      console.log(`     ✅ Оптимизировано: ${contourGroup.contours.length} → ${cleaned.length} контуров`);
+      
+      optimizedContours.push({
+        ...contourGroup,
+        contours: cleaned,
+        totalPaths: cleaned.length,
+        optimized: true
+      });
+    }
+    
+    const totalOptimized = optimizedContours.reduce((sum, c) => sum + c.contours.length, 0);
+    console.log(`   ⚡ Оптимизация завершена: ${totalOptimized} финальных контуров`);
+    
+    return optimizedContours;
+    
+  } catch (error) {
+    console.error('❌ Ошибка optimizePaths:', error);
+    return contours; // Возвращаем исходные контуры при ошибке
+  }
+}
+
+/**
+ * simplifyContours() - Упрощение контуров
+ * Adobe Illustrator simplification algorithm
+ */
+function simplifyContours(contours, tolerance) {
+  return contours.map(contour => {
+    if (!contour || contour.length === 0) return contour;
+    
+    return contour.filter((segment, index) => {
+      if (index === 0 || index === contour.length - 1) return true;
+      
+      // Удаляем сегменты короче tolerance
+      return segment.length >= tolerance;
+    });
+  }).filter(contour => contour.length > 2); // Удаляем слишком короткие контуры
+}
+
+/**
+ * mergeNearbyPaths() - Объединение близких путей
+ * Adobe path merging algorithm
+ */
+function mergeNearbyPaths(contours, threshold) {
+  const merged = [];
+  const used = new Set();
+  
+  for (let i = 0; i < contours.length; i++) {
+    if (used.has(i)) continue;
+    
+    const baseContour = contours[i];
+    const mergedContour = [...baseContour];
+    used.add(i);
+    
+    // Поиск близких контуров для объединения
+    for (let j = i + 1; j < contours.length; j++) {
+      if (used.has(j)) continue;
+      
+      const candidateContour = contours[j];
+      const distance = calculatePathDistance(baseContour, candidateContour);
+      
+      if (distance <= threshold) {
+        // Объединяем контуры
+        mergedContour.push(...candidateContour);
+        used.add(j);
+      }
+    }
+    
+    merged.push(mergedContour);
+  }
+  
+  return merged;
+}
+
+/**
+ * calculatePathDistance() - Расчет расстояния между путями
+ */
+function calculatePathDistance(path1, path2) {
+  if (!path1.length || !path2.length) return Infinity;
+  
+  let minDistance = Infinity;
+  
+  for (const seg1 of path1) {
+    for (const seg2 of path2) {
+      const dist = Math.sqrt(
+        Math.pow(seg1.start.x - seg2.start.x, 2) +
+        Math.pow(seg1.start.y - seg2.start.y, 2)
+      );
+      minDistance = Math.min(minDistance, dist);
+    }
+  }
+  
+  return minDistance;
+}
+
+/**
+ * smoothPaths() - Сглаживание путей
+ * Adobe corner smoothing algorithm
+ */
+function smoothPaths(contours, smoothingFactor) {
+  return contours.map(contour => {
+    if (contour.length < 3) return contour;
+    
+    return contour.map((segment, index) => {
+      if (index === 0 || index === contour.length - 1) return segment;
+      
+      const prev = contour[index - 1];
+      const next = contour[index + 1];
+      
+      // Сглаживание углов
+      const smoothedStart = {
+        x: segment.start.x + (prev.start.x - segment.start.x) * smoothingFactor * 0.1,
+        y: segment.start.y + (prev.start.y - segment.start.y) * smoothingFactor * 0.1
+      };
+      
+      const smoothedEnd = {
+        x: segment.end.x + (next.end.x - segment.end.x) * smoothingFactor * 0.1,
+        y: segment.end.y + (next.end.y - segment.end.y) * smoothingFactor * 0.1
+      };
+      
+      return {
+        ...segment,
+        start: smoothedStart,
+        end: smoothedEnd
+      };
+    });
+  });
+}
+
+/**
+ * removeDegenerate() - Удаление вырожденных путей
+ */
+function removeDegenerate(contours) {
+  return contours.filter(contour => {
+    if (!contour || contour.length === 0) return false;
+    
+    // Удаляем контуры с нулевой площадью
+    const totalLength = contour.reduce((sum, seg) => sum + (seg.length || 0), 0);
+    return totalLength > 3; // Минимальная длина контура
+  });
+}
+
+/**
+ * fitCurves() - Аппроксимация кривыми Безье
+ * Adobe Illustrator Bezier curve fitting algorithm
+ */
+async function fitCurves(optimizedContours, settings = {}) {
+  console.log(`🎨 ЭТАП 4.3: Adobe fitCurves - Аппроксимация кривыми Безье для ${optimizedContours.length} групп...`);
+  
+  try {
+    if (!optimizedContours || optimizedContours.length === 0) {
+      throw new Error('Нет оптимизированных контуров для аппроксимации');
+    }
+    
+    const bezierContours = [];
+    const errorThreshold = settings.errorThreshold || 2.0; // Adobe стандарт
+    const maxIterations = settings.maxIterations || 4; // Максимум итераций
+    const cornerThreshold = settings.cornerThreshold || Math.PI / 3; // 60 градусов
+    
+    console.log(`   🎯 Параметры Безье: error=${errorThreshold}, iterations=${maxIterations}, corner=${(cornerThreshold * 180 / Math.PI).toFixed(0)}°`);
+    
+    for (let groupIndex = 0; groupIndex < optimizedContours.length; groupIndex++) {
+      const contourGroup = optimizedContours[groupIndex];
+      console.log(`   🎨 Обработка группы ${groupIndex + 1}/${optimizedContours.length} (${contourGroup.contours.length} контуров)...`);
+      
+      const bezierPaths = [];
+      
+      for (const contour of contourGroup.contours) {
+        if (!contour || contour.length === 0) continue;
+        
+        // Конвертация сегментов в точки
+        const points = extractPointsFromContour(contour);
+        
+        if (points.length < 4) {
+          // Слишком мало точек для Безье, создаем простой путь
+          bezierPaths.push(createSimplePath(points));
+          continue;
+        }
+        
+        // Adobe Bezier fitting algorithm
+        const bezierCurves = fitBezierCurves(points, {
+          errorThreshold,
+          maxIterations,
+          cornerThreshold
+        });
+        
+        if (bezierCurves.length > 0) {
+          bezierPaths.push(...bezierCurves);
+        }
+      }
+      
+      console.log(`     ✅ Создано ${bezierPaths.length} кривых Безье`);
+      
+      bezierContours.push({
+        ...contourGroup,
+        contours: bezierPaths,
+        totalPaths: bezierPaths.length,
+        bezierFitted: true
+      });
+    }
+    
+    const totalCurves = bezierContours.reduce((sum, c) => sum + c.contours.length, 0);
+    console.log(`   🎨 Аппроксимация завершена: ${totalCurves} кривых Безье`);
+    
+    return bezierContours;
+    
+  } catch (error) {
+    console.error('❌ Ошибка fitCurves:', error);
+    return optimizedContours; // Возвращаем оптимизированные контуры при ошибке
+  }
+}
+
+/**
+ * extractPointsFromContour() - Извлечение точек из контура
+ */
+function extractPointsFromContour(contour) {
+  const points = [];
+  
+  for (const segment of contour) {
+    if (segment.start && typeof segment.start.x === 'number' && typeof segment.start.y === 'number') {
+      points.push(segment.start);
+    }
+    if (segment.end && typeof segment.end.x === 'number' && typeof segment.end.y === 'number') {
+      points.push(segment.end);
+    }
+  }
+  
+  // Удаление дубликатов
+  const uniquePoints = [];
+  for (const point of points) {
+    const isDuplicate = uniquePoints.some(existing => 
+      Math.abs(existing.x - point.x) < 0.1 && Math.abs(existing.y - point.y) < 0.1
+    );
+    
+    if (!isDuplicate) {
+      uniquePoints.push(point);
+    }
+  }
+  
+  return uniquePoints;
+}
+
+/**
+ * createSimplePath() - Создание простого пути
+ */
+function createSimplePath(points) {
+  if (points.length < 2) return null;
+  
+  return {
+    type: 'path',
+    commands: points.map((point, index) => ({
+      type: index === 0 ? 'M' : 'L',
+      x: point.x,
+      y: point.y
+    }))
+  };
+}
+
+/**
+ * fitBezierCurves() - Аппроксимация кривыми Безье
+ * Adobe Illustrator curve fitting algorithm
+ */
+function fitBezierCurves(points, settings) {
+  const { errorThreshold, maxIterations, cornerThreshold } = settings;
+  const curves = [];
+  
+  if (points.length < 4) return curves;
+  
+  // Поиск углов (точек излома)
+  const corners = findCorners(points, cornerThreshold);
+  corners.push(points.length - 1); // Добавляем конечную точку
+  
+  let startIndex = 0;
+  
+  for (const cornerIndex of corners) {
+    if (cornerIndex - startIndex >= 4) {
+      // Достаточно точек для кривой Безье
+      const segmentPoints = points.slice(startIndex, cornerIndex + 1);
+      const bezierCurve = fitBezierToPoints(segmentPoints, errorThreshold, maxIterations);
+      
+      if (bezierCurve) {
+        curves.push(bezierCurve);
+      }
+    } else if (cornerIndex > startIndex) {
+      // Мало точек, создаем линейный сегмент
+      const linearPath = createLinearPath(points.slice(startIndex, cornerIndex + 1));
+      if (linearPath) {
+        curves.push(linearPath);
+      }
+    }
+    
+    startIndex = cornerIndex;
+  }
+  
+  return curves;
+}
+
+/**
+ * findCorners() - Поиск углов в контуре
+ */
+function findCorners(points, threshold) {
+  const corners = [0]; // Начальная точка всегда угол
+  
+  for (let i = 1; i < points.length - 1; i++) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    const next = points[i + 1];
+    
+    // Вычисление угла
+    const angle1 = Math.atan2(curr.y - prev.y, curr.x - prev.x);
+    const angle2 = Math.atan2(next.y - curr.y, next.x - curr.x);
+    let angleDiff = Math.abs(angle2 - angle1);
+    
+    if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+    
+    if (angleDiff > threshold) {
+      corners.push(i);
+    }
+  }
+  
+  return corners;
+}
+
+/**
+ * fitBezierToPoints() - Аппроксимация набора точек одной кривой Безье
+ */
+function fitBezierToPoints(points, errorThreshold, maxIterations) {
+  if (points.length < 4) return null;
+  
+  const start = points[0];
+  const end = points[points.length - 1];
+  
+  // Начальное приближение контрольных точек
+  const length = Math.sqrt(
+    Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2)
+  );
+  
+  let cp1 = {
+    x: start.x + (end.x - start.x) * 0.25,
+    y: start.y + (end.y - start.y) * 0.25
+  };
+  
+  let cp2 = {
+    x: start.x + (end.x - start.x) * 0.75,
+    y: start.y + (end.y - start.y) * 0.75
+  };
+  
+  // Итеративная оптимизация
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    const { cp1: newCp1, cp2: newCp2, error } = optimizeControlPoints(
+      points, start, end, cp1, cp2
+    );
+    
+    if (error < errorThreshold) {
+      return {
+        type: 'bezier',
+        start,
+        end,
+        cp1: newCp1,
+        cp2: newCp2,
+        error
+      };
+    }
+    
+    cp1 = newCp1;
+    cp2 = newCp2;
+  }
+  
+  // Возвращаем лучшее приближение
+  return {
+    type: 'bezier',
+    start,
+    end,
+    cp1,
+    cp2,
+    error: calculateBezierError(points, start, end, cp1, cp2)
+  };
+}
+
+/**
+ * optimizeControlPoints() - Оптимизация контрольных точек
+ */
+function optimizeControlPoints(points, start, end, cp1, cp2) {
+  // Простая оптимизация методом наименьших квадратов
+  let bestCp1 = cp1;
+  let bestCp2 = cp2;
+  let bestError = calculateBezierError(points, start, end, cp1, cp2);
+  
+  const step = 2.0;
+  const offsets = [-step, 0, step];
+  
+  for (const dx1 of offsets) {
+    for (const dy1 of offsets) {
+      for (const dx2 of offsets) {
+        for (const dy2 of offsets) {
+          const newCp1 = { x: cp1.x + dx1, y: cp1.y + dy1 };
+          const newCp2 = { x: cp2.x + dx2, y: cp2.y + dy2 };
+          
+          const error = calculateBezierError(points, start, end, newCp1, newCp2);
+          
+          if (error < bestError) {
+            bestError = error;
+            bestCp1 = newCp1;
+            bestCp2 = newCp2;
+          }
+        }
+      }
+    }
+  }
+  
+  return { cp1: bestCp1, cp2: bestCp2, error: bestError };
+}
+
+/**
+ * calculateBezierError() - Расчет ошибки аппроксимации
+ */
+function calculateBezierError(points, start, end, cp1, cp2) {
+  let totalError = 0;
+  
+  for (let i = 0; i < points.length; i++) {
+    const t = i / (points.length - 1);
+    const bezierPoint = evaluateBezier(start, cp1, cp2, end, t);
+    const actualPoint = points[i];
+    
+    const error = Math.sqrt(
+      Math.pow(bezierPoint.x - actualPoint.x, 2) +
+      Math.pow(bezierPoint.y - actualPoint.y, 2)
+    );
+    
+    totalError += error;
+  }
+  
+  return totalError / points.length;
+}
+
+/**
+ * evaluateBezier() - Вычисление точки на кривой Безье
+ */
+function evaluateBezier(p0, p1, p2, p3, t) {
+  const u = 1 - t;
+  const tt = t * t;
+  const uu = u * u;
+  const uuu = uu * u;
+  const ttt = tt * t;
+  
+  return {
+    x: uuu * p0.x + 3 * uu * t * p1.x + 3 * u * tt * p2.x + ttt * p3.x,
+    y: uuu * p0.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + ttt * p3.y
+  };
+}
+
+/**
+ * createLinearPath() - Создание линейного пути
+ */
+function createLinearPath(points) {
+  if (points.length < 2) return null;
+  
+  return {
+    type: 'linear',
+    points: points.map(p => ({ x: p.x, y: p.y }))
+  };
+}
+
 /**
  * Упрощенное определение типа контента без тяжелых библиотек
  */
@@ -1284,13 +2110,40 @@ async function silkscreenVectorize(imageBuffer, options = {}) {
     settings.threshold = optimalThreshold;
     console.log(`🎯 Adobe автоматический порог: ${optimalThreshold}`);
     
-    // Передача масок в векторизацию
-    console.log(`🎨 ПЕРЕХОД К ВЕКТОРИЗАЦИИ с подготовленными масками`);
+    // ЭТАП 4: Векторизация
+    console.log(`🔍 ЭТАП 4: Векторизация контуров...`);
+    
+    // 4.1 Трассировка контуров
+    const contours = await traceContours(refinedColorMasks, {
+      turnPolicy: 'minority',
+      turdSize: 2,
+      alphaMax: 1.0
+    });
+    
+    // 4.2 Оптимизация путей
+    const optimizedContours = await optimizePaths(contours, {
+      simplifyTolerance: 1.5,
+      mergeThreshold: 2.0,
+      smoothingFactor: 0.5
+    });
+    
+    // 4.3 Аппроксимация кривыми Безье
+    const bezierContours = await fitCurves(optimizedContours, {
+      errorThreshold: 2.0,
+      maxIterations: 4,
+      cornerThreshold: Math.PI / 3
+    });
+    
+    console.log(`✅ ЭТАП 4 завершен: ${bezierContours.length} групп векторных контуров`);
+    
+    // Переход к созданию SVG с векторными данными
+    console.log(`🎨 СОЗДАНИЕ SVG с векторизированными контурами`);
     
     const svgContent = await createAdobeLimitedColorSVG(processedBuffer, settings, {
       colorPalette,
       colorMasks: refinedColorMasks,
-      binaryMasks
+      binaryMasks,
+      vectorContours: bezierContours
     });
     
     console.log(`📄 Результат SVG длина: ${svgContent ? svgContent.length : 0}`);
