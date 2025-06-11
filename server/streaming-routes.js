@@ -84,131 +84,19 @@ module.exports = async function apiChatStream(req, res) {
     }
 
     // Проверяем команду векторизации
-    const directVectorizerKeywords = ['нужен вектор', 'векторизатор 5006', 'вектор 5006'];
-    const isDirectVectorizerRequest = directVectorizerKeywords.some(keyword => message.toLowerCase().includes(keyword));
+    const { isVectorizerCommand, handleVectorizerCommand } = require('./vectorizer-chat-integration.js');
+    const isDirectVectorizerRequest = isVectorizerCommand(message);
     
     if (isDirectVectorizerRequest) {
       console.log('🎯 [STREAMING] ВЕКТОРИЗАЦИЯ: Обнаружена команда векторизации');
-      console.log('🎯 [STREAMING] ВЕКТОРИЗАЦИЯ: Ключевые слова найдены:', directVectorizerKeywords.filter(k => message.toLowerCase().includes(k)));
       
       try {
-        // Ищем последнее изображение в сессии
-        const { getSessionMessages } = require('./chat-history.ts');
-        const messages = await getSessionMessages(sessionId);
+        const success = await handleVectorizerCommand(message, sessionId, res, previousImage);
         
-        let imageUrl = null;
-        if (messages && messages.length > 0) {
-          for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i];
-            if (msg.sender === 'ai' && msg.text) {
-              const imageMatch = msg.text.match(/https:\/\/image\.pollinations\.ai\/prompt\/[^\s\)]+/);
-              if (imageMatch) {
-                imageUrl = imageMatch[0];
-                console.log('🔍 [STREAMING] Найдено изображение для векторизации:', imageUrl.substring(0, 100) + '...');
-                break;
-              }
-            }
-          }
-        }
-        
-        if (!imageUrl) {
-          res.write(`event: message\n`);
-          res.write(`data: ${JSON.stringify({
-            role: 'assistant',
-            content: 'Не найдено изображений для векторизации в истории чата. Сначала сгенерируйте изображение.'
-          })}\n\n`);
-          res.write(`event: done\n`);
-          res.write(`data: {}\n\n`);
-          res.end();
-          return;
-        }
-        
-        // Отправляем статус обработки
-        res.write(`event: message\n`);
-        res.write(`data: ${JSON.stringify({
-          role: 'assistant',
-          content: '🔄 Отправляю изображение на векторизацию...'
-        })}\n\n`);
-        
-        // Отправляем запрос на векторизатор с настройками для шелкографии
-        const fetch = require('node-fetch');
-        const requestData = {
-          imageUrl: imageUrl,
-          quality: 'silkscreen',      // Специальный режим для шелкографии
-          outputFormat: 'svg'
-        };
-        
-        const response = await fetch('http://localhost:5006/api/vectorizer/convert-url', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(requestData),
-          timeout: 30000
-        });
-        
-        if (response.ok) {
-          const result = await response.json();
-          
-          if (result.success) {
-            // Встраиваем SVG превью прямо в чат
-            let svgPreview = '';
-            if (result.svgContent) {
-              console.log('Streaming-routes: SVG контент получен, длина:', result.svgContent.length);
-              
-              // Проверяем, что это действительно SVG
-              if (result.svgContent.includes('<svg')) {
-                // Создаем уменьшенную версию для превью (максимум 400px)
-                let previewSvg = result.svgContent
-                  .replace(/width="[^"]*"/g, 'width="400"')
-                  .replace(/height="[^"]*"/g, 'height="400"')
-                  .replace(/viewBox="[^"]*"/g, 'viewBox="0 0 400 400"');
-                
-                // Убеждаемся, что SVG корректно закрыт
-                if (!previewSvg.includes('</svg>')) {
-                  previewSvg += '</svg>';
-                }
-                
-                svgPreview = `
-
-**Превью результата:**
-\`\`\`svg
-${previewSvg}
-\`\`\`
-
-`;
-                console.log('Streaming-routes: SVG превью создан, длина:', previewSvg.length);
-              } else {
-                console.log('Streaming-routes: Контент не содержит SVG тег');
-              }
-            }
-
-            const svgResponse = `✅ Векторизация завершена через сервер 5006!
-
-📄 Формат: SVG (5 цветов максимум)  
-🎨 Качество: ${result.quality || 'Упрощенная обработка'}
-📁 Файл: ${result.filename}${svgPreview}
-🔗 [Просмотреть изображение](/output/vectorizer/${result.filename})
-📥 [Скачать SVG файл](/output/vectorizer/${result.filename}?download=true)`;
-            
-            res.write(`event: message\n`);
-            res.write(`data: ${JSON.stringify({
-              role: 'assistant',
-              content: svgResponse
-            })}\n\n`);
-          } else {
-            res.write(`event: message\n`);
-            res.write(`data: ${JSON.stringify({
-              role: 'assistant',
-              content: `❌ Ошибка векторизации: ${result.error}`
-            })}\n\n`);
-          }
+        if (success) {
+          console.log('✅ [STREAMING] Векторизация завершена успешно');
         } else {
-          res.write(`event: message\n`);
-          res.write(`data: ${JSON.stringify({
-            role: 'assistant',
-            content: '❌ Не удалось подключиться к векторизатору на порту 5006'
-          })}\n\n`);
+          console.log('❌ [STREAMING] Векторизация завершена с ошибкой');
         }
         
       } catch (error) {
