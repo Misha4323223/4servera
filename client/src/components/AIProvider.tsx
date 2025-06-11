@@ -30,15 +30,22 @@ const renderMessageContent = (text: string) => {
     }
 
     // Add SVG preview
-    const svgContent = match[1];
+    const svgContent = match[1].trim();
+    console.log('SVG Content length:', svgContent.length);
+    console.log('SVG starts with:', svgContent.substring(0, 100));
+    
     parts.push(
       <div key={`svg-${match.index}`} className="my-3 p-3 bg-gray-50 rounded-lg border">
         <div className="text-xs text-gray-600 mb-2">SVG Preview:</div>
-        <div 
-          className="svg-preview"
-          dangerouslySetInnerHTML={{ __html: svgContent }}
-          style={{ maxWidth: '350px', maxHeight: '350px', margin: '0 auto' }}
-        />
+        {svgContent.length > 0 ? (
+          <div 
+            className="svg-preview"
+            dangerouslySetInnerHTML={{ __html: svgContent }}
+            style={{ maxWidth: '350px', maxHeight: '350px', margin: '0 auto' }}
+          />
+        ) : (
+          <div className="text-sm text-red-500">SVG контент пустой</div>
+        )}
       </div>
     );
 

@@ -160,13 +160,22 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
             // Встраиваем SVG превью прямо в чат
             let svgPreview = '';
             if (result.result.svgContent) {
-              // Создаем уменьшенную версию для превью (максимум 400px)
-              const previewSvg = result.result.svgContent
-                .replace(/width="[^"]*"/, 'width="400"')
-                .replace(/height="[^"]*"/, 'height="400"')
-                .replace(/viewBox="[^"]*"/, 'viewBox="0 0 400 400"');
+              console.log('Smart-router: SVG контент получен, длина:', result.result.svgContent.length);
               
-              svgPreview = `
+              // Проверяем, что это действительно SVG
+              if (result.result.svgContent.includes('<svg')) {
+                // Создаем уменьшенную версию для превью (максимум 400px)
+                let previewSvg = result.result.svgContent
+                  .replace(/width="[^"]*"/g, 'width="400"')
+                  .replace(/height="[^"]*"/g, 'height="400"')
+                  .replace(/viewBox="[^"]*"/g, 'viewBox="0 0 400 400"');
+                
+                // Убеждаемся, что SVG корректно закрыт
+                if (!previewSvg.includes('</svg>')) {
+                  previewSvg += '</svg>';
+                }
+                
+                svgPreview = `
 
 **Превью результата:**
 \`\`\`svg
@@ -174,6 +183,10 @@ ${previewSvg}
 \`\`\`
 
 `;
+                console.log('Smart-router: SVG превью создан, длина:', previewSvg.length);
+              } else {
+                console.log('Smart-router: Контент не содержит SVG тег');
+              }
             }
 
             const svgResponse = `✅ Векторизация завершена через сервер 5006!

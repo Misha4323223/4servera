@@ -90,15 +90,22 @@ const renderMessageContent = (content: string) => {
     }
 
     // Добавляем SVG превью
-    const svgContent = match[1];
+    const svgContent = match[1].trim();
+    console.log('AIProviderChat SVG Content length:', svgContent.length);
+    console.log('AIProviderChat SVG starts with:', svgContent.substring(0, 100));
+    
     parts.push(
       <div key={`svg-${match.index}`} className="my-4 p-4 bg-white rounded-lg shadow-sm border">
         <div className="text-sm text-gray-600 mb-2">SVG Превью:</div>
-        <div 
-          className="svg-preview"
-          dangerouslySetInnerHTML={{ __html: svgContent }}
-          style={{ maxWidth: '400px', maxHeight: '400px' }}
-        />
+        {svgContent.length > 0 ? (
+          <div 
+            className="svg-preview"
+            dangerouslySetInnerHTML={{ __html: svgContent }}
+            style={{ maxWidth: '400px', maxHeight: '400px' }}
+          />
+        ) : (
+          <div className="text-sm text-red-500">SVG контент пустой</div>
+        )}
       </div>
     );
 
