@@ -25,13 +25,13 @@ const ADOBE_SETTINGS = {
   // Настройки качества ДЛЯ ШЕЛКОГРАФИИ
   QUALITY_MODES: {
     silkscreen: { 
-      maxColors: 5, 
+      maxColors: 8, 
       simplify: false, 
       highQuality: true,
       resolution: 2400,
-      optTolerance: 0.05,
-      turdSize: 1,
-      alphaMax: 1.5
+      optTolerance: 0.01,
+      turdSize: 0,
+      alphaMax: 2.5
     },
     high: { maxColors: 8, simplify: false, highQuality: true },
     medium: { maxColors: 6, simplify: true, highQuality: true },
@@ -123,8 +123,8 @@ async function vectorizeImage(imageBuffer, options = {}) {
 async function prepareImageForAdobe(imageBuffer) {
   console.log('🔧 ADOBE PREP: Подготовка изображения...');
   
-  // Оптимальный размер для обработки (финальный SVG будет масштабирован)
-  const targetSize = 800;
+  // Высокое разрешение для детализированной шелкографии
+  const targetSize = 1200;
   
   const { data, info } = await sharp(imageBuffer)
     .resize(targetSize, targetSize, { 
