@@ -1306,35 +1306,54 @@ async function createAdobeColorMask(imageBuffer, targetColor, settings) {
   const sharp = require('sharp');
   
   try {
+    console.log(`🎯 Создание детальной маски для ${targetColor.hex}...`);
+    
     const { data, info } = await sharp(imageBuffer)
       .raw()
       .toBuffer({ resolveWithObject: true });
     
     const maskData = Buffer.alloc(info.width * info.height);
     
-    // Adobe использует строгий допуск для четкого разделения цветов
-    const tolerance = 25; // Строгий допуск для четкой цветовой сегментации
+    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Адаптивный допуск для сохранения деталей
+    let tolerance = 50; // Увеличенный базовый допуск
+    
+    // Адаптация допуска в зависимости от яркости цвета
+    const brightness = (targetColor.r + targetColor.g + targetColor.b) / 3;
+    if (brightness < 80) tolerance = 70; // Темные цвета - больший допуск
+    if (brightness > 200) tolerance = 60; // Светлые цвета
+    
+    console.log(`🔧 Допуск для ${targetColor.hex}: ${tolerance} (яркость: ${brightness})`);
     
     let pixelCount = 0;
+    let totalPixels = 0;
     
     for (let i = 0; i < data.length; i += info.channels) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
       
+      totalPixels++;
+      
       // Пропускаем прозрачные пиксели
       if (info.channels === 4 && data[i + 3] < 128) continue;
       
-      // Евклидово расстояние цветов
-      const distance = Math.sqrt(
+      // Улучшенная метрика расстояния для лучшего захвата деталей
+      const euclideanDistance = Math.sqrt(
         Math.pow(r - targetColor.r, 2) +
         Math.pow(g - targetColor.g, 2) +
         Math.pow(b - targetColor.b, 2)
       );
       
+      // Дополнительная проверка по компонентам RGB
+      const deltaR = Math.abs(r - targetColor.r);
+      const deltaG = Math.abs(g - targetColor.g);
+      const deltaB = Math.abs(b - targetColor.b);
+      const maxDelta = Math.max(deltaR, deltaG, deltaB);
+      
       const pixelIndex = Math.floor(i / info.channels);
       
-      if (distance <= tolerance) {
+      // Улучшенное условие включения - захватываем больше деталей
+      if (euclideanDistance <= tolerance || (maxDelta <= tolerance * 0.7)) {
         maskData[pixelIndex] = 255;
         pixelCount++;
       } else {
@@ -1342,30 +1361,31 @@ async function createAdobeColorMask(imageBuffer, targetColor, settings) {
       }
     }
     
-    const coverage = (pixelCount / (info.width * info.height)) * 100;
+    const coverage = (pixelCount / totalPixels) * 100;
     
-    // Adobe отбрасывает цвета с очень малым покрытием (понижаем порог)
-    if (coverage < 0.1) {
-      console.log(`⚠️ Недостаточное покрытие для ${targetColor.hex}: ${coverage.toFixed(1)}%`);
+    // Понижаем минимальное покрытие для сохранения мелких деталей
+    if (coverage < 0.02) {
+      console.log(`⚠️ Критически малое покрытие для ${targetColor.hex}: ${coverage.toFixed(3)}%`);
       return null;
     }
     
-    // Создаем маску
-    const maskBuffer = await sharp(maskData, {
+    // Применяем морфологические операции для улучшения качества маски
+    const processedMaskBuffer = await sharp(maskData, {
       raw: {
         width: info.width,
         height: info.height,
         channels: 1
       }
     })
+    .median(2) // Удаляем шум сохраняя детали
     .png()
     .toBuffer();
     
-    console.log(`✅ Маска для ${targetColor.hex}: ${coverage.toFixed(1)}%`);
-    return maskBuffer;
+    console.log(`✅ Детальная маска для ${targetColor.hex}: ${coverage.toFixed(3)}% покрытия, ${pixelCount} пикселей`);
+    return processedMaskBuffer;
     
   } catch (error) {
-    console.error(`Ошибка создания маски для ${targetColor.hex}:`, error);
+    console.error(`Ошибка создания детальной маски для ${targetColor.hex}:`, error);
     return null;
   }
 }
@@ -1377,18 +1397,18 @@ async function vectorizeAdobeMask(maskBuffer, color, settings) {
   const potrace = require('potrace');
   
   try {
-    // Adobe Illustrator параметры для шелкографии
+    // ИСПРАВЛЕННЫЕ Adobe Illustrator параметры для максимальной детализации
     const adobeParams = {
-      threshold: settings.threshold || 120,
-      turdSize: settings.minArea || 10, // Удаление мелких деталей
-      turnPolicy: 'black',
-      alphaMax: settings.alphaMax || 0.8, // Сглаживание углов
+      threshold: 128, // Средний порог для лучшего баланса
+      turdSize: 4, // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Минимальная фильтрация для сохранения деталей
+      turnPolicy: 'minority', // Улучшенная политика поворота
+      alphaMax: 1.5, // Увеличенный угол для сохранения острых углов
       optCurve: true,
-      optTolerance: settings.optTolerance || 0.2 // Упрощение путей
+      optTolerance: 0.1 // ИСПРАВЛЕНИЕ: Меньший допуск для более точных путей
     };
     
     return new Promise((resolve, reject) => {
-      console.log(`🔧 Начинаем векторизацию ${color.hex} с параметрами:`, adobeParams);
+      console.log(`🔧 Детальная векторизация ${color.hex} с улучшенными параметрами:`, adobeParams);
       
       potrace.trace(maskBuffer, adobeParams, (err, svg) => {
         if (err) {
@@ -1397,24 +1417,36 @@ async function vectorizeAdobeMask(maskBuffer, color, settings) {
         } else {
           console.log(`📄 SVG получен для ${color.hex}, длина: ${svg ? svg.length : 0}`);
           
-          // Извлекаем пути из SVG
-          const pathRegex = /<path[^>]*d="([^"]*)"[^>]*>/g;
-          const paths = [];
-          let match;
-          
-          while ((match = pathRegex.exec(svg)) !== null) {
-            console.log(`✂️ Найден путь для ${color.hex}: ${match[1].substring(0, 50)}...`);
-            // Создаем цветной SVG элемент вместо простого пути
-            const coloredPath = {
-              path: match[1],
-              color: color.hex,
-              fill: color.hex,
-              opacity: 1.0
+          if (!svg || svg.length < 100) {
+            console.log(`⚠️ Слишком короткий SVG для ${color.hex}, пробуем альтернативные параметры`);
+            
+            // Альтернативные параметры для сложных масок
+            const fallbackParams = {
+              threshold: 100,
+              turdSize: 2, // Еще меньше для захвата мелких деталей
+              turnPolicy: 'black',
+              alphaMax: 1.0,
+              optCurve: false, // Отключаем оптимизацию кривых
+              optTolerance: 0.05
             };
-            paths.push(coloredPath);
+            
+            potrace.trace(maskBuffer, fallbackParams, (err2, svg2) => {
+              if (err2 || !svg2) {
+                console.log(`❌ Альтернативная векторизация тоже не удалась для ${color.hex}`);
+                resolve([]);
+                return;
+              }
+              
+              const paths = extractPathsFromSVG(svg2, color);
+              console.log(`🔄 Альтернативная векторизация ${color.hex}: ${paths.length} путей`);
+              resolve(paths);
+            });
+            
+            return;
           }
           
-          console.log(`🎯 ${color.hex}: ${paths.length} цветных путей извлечено`);
+          const paths = extractPathsFromSVG(svg, color);
+          console.log(`🎯 ${color.hex}: ${paths.length} детальных путей извлечено`);
           resolve(paths);
         }
       });
@@ -1424,6 +1456,40 @@ async function vectorizeAdobeMask(maskBuffer, color, settings) {
     console.error(`Ошибка векторизации маски ${color.hex}:`, error);
     return [];
   }
+}
+
+/**
+ * Улучшенное извлечение путей из SVG с детальным анализом
+ */
+function extractPathsFromSVG(svg, color) {
+  const paths = [];
+  
+  // Ищем все пути в SVG
+  const pathRegex = /<path[^>]*d="([^"]*)"[^>]*>/g;
+  let match;
+  
+  while ((match = pathRegex.exec(svg)) !== null) {
+    const pathData = match[1];
+    
+    // Фильтруем слишком короткие или простые пути
+    if (pathData.length < 10) continue;
+    
+    // Проверяем сложность пути (количество команд)
+    const commandCount = (pathData.match(/[MmLlHhVvCcSsQqTtAaZz]/g) || []).length;
+    if (commandCount < 2) continue;
+    
+    console.log(`✂️ Найден детальный путь для ${color.hex}: ${commandCount} команд, длина ${pathData.length}`);
+    
+    const coloredPath = {
+      path: pathData,
+      color: color.hex,
+      fill: color.hex,
+      opacity: 1.0
+    };
+    paths.push(coloredPath);
+  }
+  
+  return paths;
 }
 
 /**
