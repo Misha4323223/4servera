@@ -145,38 +145,45 @@ async function analyzeImageType(imageBuffer) {
     const grayData = grayResult.data;
     const grayInfo = grayResult.info;
     
-    let totalContrast = 0;
-    let contrastPixels = 0;
+    // Валидация данных Sobel анализа
+    let avgContrast = 25; // Безопасное значение по умолчанию
     
-    // Sobel edge detection для правильного анализа контрастности
-    for (let y = 1; y < grayInfo.height - 1; y++) {
-      for (let x = 1; x < grayInfo.width - 1; x++) {
+    if (!grayData || !grayInfo || grayInfo.width < 3 || grayInfo.height < 3) {
+      console.log('   ⚠️ Изображение слишком мало для Sobel анализа, используем значение по умолчанию');
+    } else {
+      let totalContrast = 0;
+      let contrastPixels = 0;
+      
+      // Sobel edge detection для правильного анализа контрастности
+      for (let y = 1; y < grayInfo.height - 1; y++) {
+        for (let x = 1; x < grayInfo.width - 1; x++) {
         
-        // Sobel X gradient
-        const gx = 
-          -1 * grayData[(y-1) * grayInfo.width + (x-1)] +
-          -2 * grayData[y * grayInfo.width + (x-1)] +
-          -1 * grayData[(y+1) * grayInfo.width + (x-1)] +
-          1 * grayData[(y-1) * grayInfo.width + (x+1)] +
-          2 * grayData[y * grayInfo.width + (x+1)] +
-          1 * grayData[(y+1) * grayInfo.width + (x+1)];
-        
-        // Sobel Y gradient
-        const gy = 
-          -1 * grayData[(y-1) * grayInfo.width + (x-1)] +
-          -2 * grayData[(y-1) * grayInfo.width + x] +
-          -1 * grayData[(y-1) * grayInfo.width + (x+1)] +
-          1 * grayData[(y+1) * grayInfo.width + (x-1)] +
-          2 * grayData[(y+1) * grayInfo.width + x] +
-          1 * grayData[(y+1) * grayInfo.width + (x+1)];
-        
-        const magnitude = Math.sqrt(gx * gx + gy * gy);
-        totalContrast += magnitude;
-        contrastPixels++;
+          // Sobel X gradient
+          const gx = 
+            -1 * grayData[(y-1) * grayInfo.width + (x-1)] +
+            -2 * grayData[y * grayInfo.width + (x-1)] +
+            -1 * grayData[(y+1) * grayInfo.width + (x-1)] +
+            1 * grayData[(y-1) * grayInfo.width + (x+1)] +
+            2 * grayData[y * grayInfo.width + (x+1)] +
+            1 * grayData[(y+1) * grayInfo.width + (x+1)];
+          
+          // Sobel Y gradient
+          const gy = 
+            -1 * grayData[(y-1) * grayInfo.width + (x-1)] +
+            -2 * grayData[(y-1) * grayInfo.width + x] +
+            -1 * grayData[(y-1) * grayInfo.width + (x+1)] +
+            1 * grayData[(y+1) * grayInfo.width + (x-1)] +
+            2 * grayData[(y+1) * grayInfo.width + x] +
+            1 * grayData[(y+1) * grayInfo.width + (x+1)];
+          
+          const magnitude = Math.sqrt(gx * gx + gy * gy);
+          totalContrast += magnitude;
+          contrastPixels++;
+        }
       }
+      
+      avgContrast = contrastPixels > 0 ? totalContrast / contrastPixels / 255 * 100 : 25;
     }
-    
-    const avgContrast = contrastPixels > 0 ? totalContrast / contrastPixels / 255 * 100 : 0;
     
     // Adobe классификация изображения
     let imageType = 'AUTO';
@@ -224,7 +231,7 @@ async function analyzeImageType(imageBuffer) {
       uniqueColors: 5,
       avgContrast: 50,
       colorComplexity: 0.3,
-      recommendedSettings: ADOBE_SILKSCREEN_PRESET.settings,
+      recommendedSettings: { ...ADOBE_SILKSCREEN_PRESET.settings, maxColors: 5 },
       dimensions: { width: 400, height: 400 }
     };
   }
