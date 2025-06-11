@@ -22,9 +22,17 @@ const ADOBE_SETTINGS = {
     optCurve: true
   },
   
-  // Настройки качества
+  // Настройки качества ДЛЯ ШЕЛКОГРАФИИ
   QUALITY_MODES: {
-    silkscreen: { maxColors: 5, simplify: true, highQuality: false },
+    silkscreen: { 
+      maxColors: 5, 
+      simplify: false, 
+      highQuality: true,
+      resolution: 2400,
+      optTolerance: 0.05,
+      turdSize: 1,
+      alphaMax: 1.5
+    },
     high: { maxColors: 8, simplify: false, highQuality: true },
     medium: { maxColors: 6, simplify: true, highQuality: true },
     low: { maxColors: 4, simplify: true, highQuality: false }
@@ -115,8 +123,8 @@ async function vectorizeImage(imageBuffer, options = {}) {
 async function prepareImageForAdobe(imageBuffer) {
   console.log('🔧 ADOBE PREP: Подготовка изображения...');
   
-  // Adobe использует оптимальный размер для обработки
-  const targetSize = 400;
+  // Оптимальный размер для обработки (финальный SVG будет масштабирован)
+  const targetSize = 800;
   
   const { data, info } = await sharp(imageBuffer)
     .resize(targetSize, targetSize, { 
@@ -369,12 +377,15 @@ async function adobePotrace(maskBuffer, color, settings) {
   
   return new Promise((resolve, reject) => {
     const potraceParams = {
-      threshold: settings.threshold,
-      optTolerance: settings.optTolerance,
-      turdSize: settings.turdSize,
+      threshold: settings.threshold || 90,
+      optTolerance: settings.optTolerance || 0.02,
+      turdSize: settings.turdSize || 0,
       turnPolicy: potrace.Potrace.TURNPOLICY_MINORITY,
-      alphaMax: settings.alphaMax,
-      optCurve: settings.optCurve
+      alphaMax: settings.alphaMax || 2.0,
+      optCurve: true,
+      blackOnWhite: true,
+      steps: 1024,
+      range: 0.005
     };
     
     potrace.trace(maskBuffer, potraceParams, (err, svg) => {

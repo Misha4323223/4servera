@@ -13,7 +13,7 @@ async function adobeColorQuantization(imageBuffer, maxColors = 5) {
   console.log(`🎨 ADOBE TRACE: Квантизация на ${maxColors} цветов`);
   
   const { data, info } = await sharp(imageBuffer)
-    .resize(400, 400, { fit: 'inside' })
+    .resize(2400, 2400, { fit: 'inside' })
     .raw()
     .toBuffer({ resolveWithObject: true });
   
@@ -140,7 +140,7 @@ async function createAdobeColorMask(imageBuffer, targetColor) {
   console.log(`🎯 ADOBE MASK: Создание маски для ${targetColor.hex}`);
   
   const { data, info } = await sharp(imageBuffer)
-    .resize(800, 800, { fit: 'inside', withoutEnlargement: false }) // Увеличиваем для видимости
+    .resize(2400, 2400, { fit: 'inside', withoutEnlargement: false }) // Шелкография требует высокое разрешение
     .raw()
     .toBuffer({ resolveWithObject: true });
   
@@ -244,15 +244,17 @@ async function adobeVectorizeColorMask(maskBuffer, color, originalSize) {
     
     return new Promise((resolve, reject) => {
       const params = {
-        // Adobe Illustrator параметры для ТОЛСТЫХ контуров
-        threshold: 120,
-        optTolerance: 0.4,
-        turdSize: 4,
-        turnPolicy: potrace.Potrace.TURNPOLICY_MAJORITY,
-        alphaMax: 0.8,
+        // Adobe Illustrator параметры для ВЫСОКОДЕТАЛИЗИРОВАННОЙ шелкографии
+        threshold: 100,
+        optTolerance: 0.1,   // Меньше упрощений = больше деталей
+        turdSize: 1,         // Минимальный размер для максимальной детализации
+        turnPolicy: potrace.Potrace.TURNPOLICY_MINORITY,
+        alphaMax: 1.3,       // Более сложные кривые
         optCurve: true,
-        // Дополнительные параметры для видимости
-        blackOnWhite: true
+        blackOnWhite: true,
+        // Дополнительные настройки для шелкографии
+        steps: 256,          // Максимальное количество шагов
+        range: 0.02          // Минимальная толерантность
       };
       
       potrace.trace(maskBuffer, params, (err, svg) => {
