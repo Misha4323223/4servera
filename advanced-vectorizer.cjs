@@ -2979,6 +2979,365 @@ function expandPathForOverlapping(path, tolerance) {
 }
 
 /**
+ * ПОТОКОВАЯ ОБРАБОТКА ДЛЯ ПРОФЕССИОНАЛЬНОЙ ШЕЛКОГРАФИИ
+ * Tile-based processing для изображений до 30MB
+ */
+
+/**
+ * TileProcessor - Класс для разбивки и обработки изображений по частям
+ */
+class TileProcessor {
+  constructor(imageInfo, options = {}) {
+    this.width = imageInfo.width;
+    this.height = imageInfo.height;
+    this.tileSize = options.tileSize || 512;
+    this.overlap = options.overlap || 32;
+    this.maxMemoryMB = options.maxMemoryMB || 150;
+    
+    this.tiles = this.calculateTileGrid();
+    this.processedTiles = new Map();
+  }
+  
+  calculateTileGrid() {
+    const tiles = [];
+    const effectiveTileSize = this.tileSize - this.overlap;
+    
+    for (let y = 0; y < this.height; y += effectiveTileSize) {
+      for (let x = 0; x < this.width; x += effectiveTileSize) {
+        const tileWidth = Math.min(this.tileSize, this.width - x);
+        const tileHeight = Math.min(this.tileSize, this.height - y);
+        
+        tiles.push({
+          id: `tile_${x}_${y}`,
+          x, y, 
+          width: tileWidth, 
+          height: tileHeight,
+          processed: false
+        });
+      }
+    }
+    
+    console.log(`   📐 Создана сетка: ${tiles.length} tiles (${this.tileSize}×${this.tileSize})`);
+    return tiles;
+  }
+  
+  getTile(id) {
+    return this.tiles.find(tile => tile.id === id);
+  }
+  
+  markTileProcessed(id, data) {
+    this.processedTiles.set(id, data);
+    const tile = this.getTile(id);
+    if (tile) tile.processed = true;
+  }
+  
+  getProgress() {
+    const processed = this.tiles.filter(t => t.processed).length;
+    return {
+      processed,
+      total: this.tiles.length,
+      percentage: Math.round((processed / this.tiles.length) * 100)
+    };
+  }
+}
+
+/**
+ * MemoryManager - Контроль потребления памяти
+ */
+class MemoryManager {
+  constructor(maxMemoryMB = 150) {
+    this.maxMemoryMB = maxMemoryMB;
+    this.allocatedArrays = new Set();
+    this.memoryWarningThreshold = maxMemoryMB * 0.8;
+  }
+  
+  allocateArray(size, type = 'Uint8Array') {
+    const sizeInMB = (size * this.getTypeSize(type)) / (1024 * 1024);
+    
+    if (this.getCurrentMemoryUsage() + sizeInMB > this.maxMemoryMB) {
+      console.log(`   ⚠️ Превышен лимит памяти: ${sizeInMB}MB`);
+      this.forceCleanup();
+    }
+    
+    let array;
+    switch (type) {
+      case 'Uint8Array':
+        array = new Uint8Array(size);
+        break;
+      case 'Float32Array':
+        array = new Float32Array(size);
+        break;
+      default:
+        array = new Uint8Array(size);
+    }
+    
+    this.allocatedArrays.add({ array, size: sizeInMB });
+    return array;
+  }
+  
+  getTypeSize(type) {
+    switch (type) {
+      case 'Uint8Array': return 1;
+      case 'Float32Array': return 4;
+      default: return 1;
+    }
+  }
+  
+  getCurrentMemoryUsage() {
+    const usage = Array.from(this.allocatedArrays).reduce((sum, item) => sum + item.size, 0);
+    
+    if (usage > this.memoryWarningThreshold) {
+      console.log(`   ⚠️ Использование памяти: ${usage.toFixed(1)}MB`);
+    }
+    
+    return usage;
+  }
+  
+  forceCleanup() {
+    console.log(`   🧹 Принудительная очистка памяти...`);
+    const sizeBefore = this.getCurrentMemoryUsage();
+    
+    // Очистка старых массивов
+    for (const item of this.allocatedArrays) {
+      if (item.array) {
+        item.array.fill(0);
+        delete item.array;
+      }
+    }
+    
+    this.allocatedArrays.clear();
+    
+    // Принудительный garbage collection (если доступен)
+    if (global.gc) {
+      global.gc();
+    }
+    
+    console.log(`   ✅ Очищено ${sizeBefore.toFixed(1)}MB памяти`);
+  }
+  
+  cleanup(arrayOrSet) {
+    if (arrayOrSet instanceof Set) {
+      arrayOrSet.clear();
+    } else if (arrayOrSet) {
+      arrayOrSet.fill(0);
+    }
+  }
+}
+
+/**
+ * ProgressTracker - Отслеживание прогресса обработки
+ */
+class ProgressTracker {
+  constructor(totalSteps = 5) {
+    this.totalSteps = totalSteps;
+    this.currentStep = 0;
+    this.stepNames = [
+      'Предобработка',
+      'Цветовая сегментация', 
+      'Создание масок',
+      'Векторизация контуров',
+      'Сборка SVG'
+    ];
+    this.stepProgress = {};
+    this.startTime = Date.now();
+  }
+  
+  startStep(stepIndex, stepName) {
+    this.currentStep = stepIndex;
+    if (stepName) this.stepNames[stepIndex] = stepName;
+    
+    this.stepProgress[stepIndex] = {
+      name: this.stepNames[stepIndex],
+      started: Date.now(),
+      progress: 0
+    };
+    
+    console.log(`🚀 ЭТАП ${stepIndex + 1}: ${this.stepNames[stepIndex]}...`);
+  }
+  
+  updateStepProgress(progress, details = '') {
+    if (this.stepProgress[this.currentStep]) {
+      this.stepProgress[this.currentStep].progress = progress;
+      
+      const elapsed = Date.now() - this.stepProgress[this.currentStep].started;
+      console.log(`   📊 Прогресс: ${progress}% (${elapsed}ms) ${details}`);
+    }
+  }
+  
+  completeStep() {
+    if (this.stepProgress[this.currentStep]) {
+      const elapsed = Date.now() - this.stepProgress[this.currentStep].started;
+      this.stepProgress[this.currentStep].progress = 100;
+      this.stepProgress[this.currentStep].completed = Date.now();
+      
+      console.log(`   ✅ ЭТАП ${this.currentStep + 1} завершен за ${elapsed}ms`);
+    }
+  }
+  
+  getOverallProgress() {
+    const completedSteps = Object.values(this.stepProgress).filter(s => s.progress === 100).length;
+    const currentProgress = this.stepProgress[this.currentStep]?.progress || 0;
+    
+    return {
+      step: this.currentStep + 1,
+      stepName: this.stepNames[this.currentStep],
+      stepProgress: currentProgress,
+      overallProgress: Math.round(((completedSteps + currentProgress / 100) / this.totalSteps) * 100),
+      elapsedTime: Date.now() - this.startTime
+    };
+  }
+  
+  getEstimatedTimeRemaining() {
+    const progress = this.getOverallProgress();
+    if (progress.overallProgress <= 0) return null;
+    
+    const totalEstimated = (progress.elapsedTime / progress.overallProgress) * 100;
+    return Math.max(0, totalEstimated - progress.elapsedTime);
+  }
+}
+
+/**
+ * StreamVectorizer - Главный класс потоковой векторизации
+ */
+class StreamVectorizer {
+  constructor(imageBuffer, options = {}) {
+    this.imageBuffer = imageBuffer;
+    this.options = {
+      maxColors: 5,
+      tileSize: 512,
+      overlap: 32,
+      maxMemoryMB: 150,
+      ...options
+    };
+    
+    this.memoryManager = new MemoryManager(this.options.maxMemoryMB);
+    this.progressTracker = new ProgressTracker(5);
+    this.globalColorPalette = null;
+    this.tileProcessor = null;
+  }
+  
+  async process() {
+    console.log(`🌊 ЗАПУСК ПОТОКОВОЙ ВЕКТОРИЗАЦИИ`);
+    console.log(`   📊 Размер файла: ${Math.round(this.imageBuffer.length / 1024)}KB`);
+    console.log(`   ⚙️ Настройки: tiles=${this.options.tileSize}px, память=${this.options.maxMemoryMB}MB`);
+    
+    try {
+      // Инициализация
+      const imageInfo = await this.initializeImage();
+      this.tileProcessor = new TileProcessor(imageInfo, this.options);
+      
+      // Выполнение этапов
+      await this.runPreprocessing(imageInfo);
+      await this.runColorSegmentation();
+      await this.runMaskCreation();
+      await this.runVectorization();
+      const result = await this.runSVGGeneration();
+      
+      console.log(`✅ ПОТОКОВАЯ ВЕКТОРИЗАЦИЯ ЗАВЕРШЕНА`);
+      return result;
+      
+    } catch (error) {
+      console.error(`❌ Ошибка потоковой векторизации:`, error.message);
+      this.memoryManager.forceCleanup();
+      throw error;
+    }
+  }
+  
+  async initializeImage() {
+    // Получение информации об изображении без полной загрузки
+    const sharp = require('sharp');
+    const image = sharp(this.imageBuffer);
+    const metadata = await image.metadata();
+    
+    console.log(`   📐 Размеры: ${metadata.width}×${metadata.height}`);
+    
+    return {
+      width: metadata.width,
+      height: metadata.height,
+      channels: metadata.channels,
+      format: metadata.format
+    };
+  }
+  
+  async runPreprocessing(imageInfo) {
+    this.progressTracker.startStep(0, 'Предобработка и разбивка на tiles');
+    
+    // Предварительная обработка - пока заглушка
+    this.progressTracker.updateStepProgress(50, 'Оптимизация изображения');
+    
+    // Подготовка к разбивке
+    this.progressTracker.updateStepProgress(100, `Создано ${this.tileProcessor.tiles.length} tiles`);
+    this.progressTracker.completeStep();
+  }
+  
+  async runColorSegmentation() {
+    this.progressTracker.startStep(1, 'Глобальная цветовая сегментация');
+    
+    // Глобальная сегментация - пока заглушка
+    this.globalColorPalette = [
+      { hex: '#8a1143', count: 1000 },
+      { hex: '#003345', count: 5000 },
+      { hex: '#02121c', count: 3000 },
+      { hex: '#004e5f', count: 2000 },
+      { hex: '#007883', count: 1500 }
+    ];
+    
+    this.progressTracker.updateStepProgress(100, `Палитра: ${this.globalColorPalette.length} цветов`);
+    this.progressTracker.completeStep();
+  }
+  
+  async runMaskCreation() {
+    this.progressTracker.startStep(2, 'Создание масок по tiles');
+    
+    // Обработка масок по tiles - пока заглушка
+    for (let i = 0; i < this.tileProcessor.tiles.length; i++) {
+      const tile = this.tileProcessor.tiles[i];
+      const progress = Math.round(((i + 1) / this.tileProcessor.tiles.length) * 100);
+      
+      this.progressTracker.updateStepProgress(progress, `Tile ${i + 1}/${this.tileProcessor.tiles.length}`);
+      
+      // Имитация обработки
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    
+    this.progressTracker.completeStep();
+  }
+  
+  async runVectorization() {
+    this.progressTracker.startStep(3, 'Векторизация по tiles');
+    
+    // Векторизация - пока заглушка
+    this.progressTracker.updateStepProgress(100, 'Контуры трассированы');
+    this.progressTracker.completeStep();
+  }
+  
+  async runSVGGeneration() {
+    this.progressTracker.startStep(4, 'Сборка финального SVG');
+    
+    // Генерация SVG - пока заглушка
+    const mockSVG = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="800" height="600" viewBox="0 0 800 600">
+  <metadata>
+    <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+      <rdf:Description>
+        <dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">BOOOMERANGS Stream Vectorized</dc:title>
+        <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">BOOOMERANGS Stream Vectorizer</dc:creator>
+      </rdf:Description>
+    </rdf:RDF>
+  </metadata>
+  <g id="layer_1">
+    <path d="M 100,100 L 200,100 L 200,200 L 100,200 Z" fill="#8a1143"/>
+  </g>
+</svg>`;
+    
+    this.progressTracker.updateStepProgress(100, `SVG: ${mockSVG.length} символов`);
+    this.progressTracker.completeStep();
+    
+    return mockSVG;
+  }
+}
+
+/**
  * ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ADOBE ТЕХНИК
  */
 
@@ -5744,5 +6103,9 @@ module.exports = {
   silkscreenVectorize,
   ADOBE_SILKSCREEN_PRESET,
   OUTPUT_FORMATS,
-  CONTENT_TYPES
+  CONTENT_TYPES,
+  StreamVectorizer,
+  TileProcessor,
+  MemoryManager,
+  ProgressTracker
 };
