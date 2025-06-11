@@ -1028,9 +1028,9 @@ async function extractAdobeColors(imageBuffer, maxColors) {
   const sharp = require('sharp');
   
   try {
-    // Уменьшаем изображение для анализа как в Adobe
+    // Увеличиваем размер выборки для лучшего цветового анализа
     const { data, info } = await sharp(imageBuffer)
-      .resize(200, 200, { fit: 'inside' })
+      .resize(400, 400, { fit: 'inside' })
       .raw()
       .toBuffer({ resolveWithObject: true });
     
@@ -1089,21 +1089,13 @@ function performKMeans(pixels, k) {
   // Инициализация центроидов с разнообразием цветов
   let centroids = [];
   
-  // Добавляем основные цвета для шелкографии
-  const baseColors = [
-    { r: 0, g: 0, b: 0, weight: 0 },      // Черный
-    { r: 255, g: 255, b: 255, weight: 0 }, // Белый
-    { r: 128, g: 128, b: 128, weight: 0 }, // Серый
-    { r: 64, g: 64, b: 64, weight: 0 }     // Темно-серый
-  ];
-  
+  // Умная инициализация центроидов на основе реальных цветов изображения
   for (let i = 0; i < k; i++) {
-    if (i < baseColors.length) {
-      centroids.push({ ...baseColors[i] });
-    } else {
-      const randomPixel = pixels[Math.floor(Math.random() * pixels.length)];
-      centroids.push({ ...randomPixel, weight: 0 });
-    }
+    // Выбираем пиксели с равномерным распределением по изображению
+    const step = Math.floor(pixels.length / k);
+    const index = i * step;
+    const selectedPixel = pixels[Math.min(index, pixels.length - 1)];
+    centroids.push({ ...selectedPixel, weight: 0 });
   }
   
   console.log(`🎯 Инициализировано ${centroids.length} центроидов`);
