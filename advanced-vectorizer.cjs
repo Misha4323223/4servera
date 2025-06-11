@@ -398,7 +398,12 @@ async function extractDominantColors(imageBuffer, maxColors = 5) {
   const sharp = require('sharp');
   
   try {
-    console.log(`🔍 ЭТАП 1: Анализ исходного изображения для извлечения ${maxColors} доминирующих цветов`);
+    console.log(`🔍 ДИАГНОСТИКА ЭТАП 1: Анализ исходного изображения для извлечения ${maxColors} доминирующих цветов`);
+    
+    // Сначала анализируем исходное изображение
+    const originalMeta = await sharp(imageBuffer).metadata();
+    console.log(`📊 ДИАГНОСТИКА: Исходное изображение - ${originalMeta.width}x${originalMeta.height}, каналы: ${originalMeta.channels}, формат: ${originalMeta.format}`);
+    console.log(`📊 ДИАГНОСТИКА: Размер буфера: ${imageBuffer.length} байт`);
     
     // Работаем с исходным изображением, увеличенным для лучшего анализа
     const { data, info } = await sharp(imageBuffer)
@@ -406,7 +411,7 @@ async function extractDominantColors(imageBuffer, maxColors = 5) {
       .raw()
       .toBuffer({ resolveWithObject: true });
     
-    console.log(`📊 Анализируем изображение ${info.width}x${info.height}, каналов: ${info.channels}`);
+    console.log(`📊 ДИАГНОСТИКА: Анализируем изображение ${info.width}x${info.height}, каналов: ${info.channels}`);
     
     const colorMap = new Map();
     let totalPixels = 0;
@@ -431,7 +436,17 @@ async function extractDominantColors(imageBuffer, maxColors = 5) {
       totalPixels++;
     }
     
-    console.log(`🎨 Найдено уникальных цветов: ${colorMap.size}, всего пикселей: ${totalPixels}`);
+    console.log(`🎨 ДИАГНОСТИКА: Найдено уникальных цветов: ${colorMap.size}, всего пикселей: ${totalPixels}`);
+    
+    // Показываем первые 10 цветов для диагностики
+    const topRawColors = Array.from(colorMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    console.log(`📋 ДИАГНОСТИКА: Топ-10 сырых цветов:`);
+    topRawColors.forEach(([colorKey, count], index) => {
+      const [r, g, b] = colorKey.split(',').map(Number);
+      const hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+      const percentage = ((count / totalPixels) * 100).toFixed(1);
+      console.log(`   ${index + 1}. ${hex} (RGB: ${r},${g},${b}) - ${count} пикселей (${percentage}%)`);
+    });
     
     // Интеллектуальный отбор цветов для шелкографии
     const allColors = Array.from(colorMap.entries())
@@ -1306,11 +1321,13 @@ async function createAdobeColorMask(imageBuffer, targetColor, settings) {
   const sharp = require('sharp');
   
   try {
-    console.log(`🎯 Создание детальной маски для ${targetColor.hex}...`);
+    console.log(`🎯 ДИАГНОСТИКА ЭТАП 2: Создание детальной маски для ${targetColor.hex}...`);
     
     const { data, info } = await sharp(imageBuffer)
       .raw()
       .toBuffer({ resolveWithObject: true });
+    
+    console.log(`📊 ДИАГНОСТИКА: Изображение для маски - ${info.width}x${info.height}, каналы: ${info.channels}, размер данных: ${data.length}`);
     
     const maskData = Buffer.alloc(info.width * info.height);
     
@@ -1322,7 +1339,8 @@ async function createAdobeColorMask(imageBuffer, targetColor, settings) {
     if (brightness < 80) tolerance = 70; // Темные цвета - больший допуск
     if (brightness > 200) tolerance = 60; // Светлые цвета
     
-    console.log(`🔧 Допуск для ${targetColor.hex}: ${tolerance} (яркость: ${brightness})`);
+    console.log(`🔧 ДИАГНОСТИКА: Допуск для ${targetColor.hex}: ${tolerance} (яркость: ${brightness.toFixed(1)})`);
+    console.log(`🔧 ДИАГНОСТИКА: Целевой цвет RGB(${targetColor.r}, ${targetColor.g}, ${targetColor.b})`);
     
     let pixelCount = 0;
     let totalPixels = 0;
@@ -1362,6 +1380,29 @@ async function createAdobeColorMask(imageBuffer, targetColor, settings) {
     }
     
     const coverage = (pixelCount / totalPixels) * 100;
+    
+    console.log(`📊 ДИАГНОСТИКА: Результат маски для ${targetColor.hex}:`);
+    console.log(`   - Обработано пикселей: ${totalPixels}`);
+    console.log(`   - Найдено совпадений: ${pixelCount}`);
+    console.log(`   - Покрытие: ${coverage.toFixed(2)}%`);
+    
+    // Показываем несколько примеров пикселей для диагностики
+    const samplePixels = [];
+    for (let i = 0; i < Math.min(data.length, 50 * info.channels); i += info.channels) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const distance = Math.sqrt(
+        Math.pow(r - targetColor.r, 2) +
+        Math.pow(g - targetColor.g, 2) +
+        Math.pow(b - targetColor.b, 2)
+      );
+      samplePixels.push({ r, g, b, distance, matches: distance <= tolerance });
+    }
+    
+    const matchingSamples = samplePixels.filter(p => p.matches).length;
+    console.log(`📊 ДИАГНОСТИКА: Из первых 50 пикселей ${matchingSamples} совпадают с цветом ${targetColor.hex}`);
+    
     
     // Понижаем минимальное покрытие для сохранения мелких деталей
     if (coverage < 0.02) {
