@@ -552,8 +552,9 @@ async function performKMeansSegmentation(imageBuffer, numColors) {
     
   } catch (error) {
     console.error('❌ Ошибка performKMeansSegmentation:', error);
-    // Безопасная палитра по умолчанию
-    return Array(Math.min(numColors, 5)).fill().map((_, i) => ({
+    // Безопасная палитра по умолчанию (фиксированное количество цветов)
+    const safeNumColors = Math.min(5, Math.max(1, numColors || 3));
+    return Array(safeNumColors).fill().map((_, i) => ({
       r: [0, 85, 170, 255, 128][i] || 128,
       g: [0, 85, 170, 255, 128][i] || 128,
       b: [0, 85, 170, 255, 128][i] || 128,
@@ -577,6 +578,11 @@ async function adaptiveColorReduction(imageBuffer, maxColors) {
     const { data, info } = await sharp(imageBuffer)
       .raw()
       .toBuffer({ resolveWithObject: true });
+    
+    // Валидация входных данных
+    if (!data || data.length === 0 || !info || !info.width || !info.height) {
+      throw new Error('Невалидные данные изображения для adaptiveColorReduction');
+    }
     
     // Анализ гистограммы цветов
     const colorHistogram = new Map();
@@ -675,6 +681,11 @@ async function edgeAwareQuantization(imageBuffer, edges, maxColors) {
       .raw()
       .toBuffer({ resolveWithObject: true });
     
+    // Валидация входных данных
+    if (!data || data.length === 0 || !info || !info.width || !info.height) {
+      throw new Error('Невалидные данные изображения для edgeAwareQuantization');
+    }
+    
     // Создание карты краев если не предоставлена
     let edgeMap = edges;
     if (!edgeMap) {
@@ -768,7 +779,12 @@ async function createEdgeMap(imageBuffer) {
     const { data, info } = grayResult;
     
     // Валидация размеров для Sobel
-    if (!data || !info || info.width < 3 || info.height < 3) {
+    if (!data || !info || !info.width || !info.height) {
+      console.log('   ⚠️ Невалидные данные для Sobel edge detection');
+      return [];
+    }
+    
+    if (info.width < 3 || info.height < 3) {
       console.log('   ⚠️ Изображение слишком мало для Sobel edge detection');
       return new Array(info.width * info.height).fill(0);
     }
