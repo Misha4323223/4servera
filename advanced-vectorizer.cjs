@@ -967,7 +967,7 @@ async function createAdobeLimitedColorSVG(imageBuffer, settings) {
       const colorMask = await createAdobeColorMask(imageBuffer, color, settings);
       
       if (colorMask) {
-        console.log(`🎨 Обрабатываем цвет ${i + 1}/${adobeColors.length}: ${color.hex}`);
+        console.log(`🎨 Обрабатываем цвет ${i + 1}/${dominantColors.length}: ${color.hex}`);
         
         // Векторизуем маску с Adobe параметрами
         const paths = await vectorizeAdobeMask(colorMask, color, settings);
@@ -980,9 +980,9 @@ async function createAdobeLimitedColorSVG(imageBuffer, settings) {
           const limitedPaths = paths.slice(0, 20);
           let addedPaths = 0;
           
-          limitedPaths.forEach(path => {
-            if (path && path.length > 10) { // Убираем верхний лимит - Adobe не ограничивает длину путей
-              svgContent += `    <path d="${path}"/>\n`;
+          limitedPaths.forEach(pathObj => {
+            if (pathObj && pathObj.path && pathObj.path.length > 10) {
+              svgContent += `    <path d="${pathObj.path}" fill="${pathObj.fill}" opacity="${pathObj.opacity}"/>\n`;
               addedPaths++;
             }
           });
@@ -1231,10 +1231,17 @@ async function vectorizeAdobeMask(maskBuffer, color, settings) {
           
           while ((match = pathRegex.exec(svg)) !== null) {
             console.log(`✂️ Найден путь для ${color.hex}: ${match[1].substring(0, 50)}...`);
-            paths.push(match[1]);
+            // Создаем цветной SVG элемент вместо простого пути
+            const coloredPath = {
+              path: match[1],
+              color: color.hex,
+              fill: color.hex,
+              opacity: 1.0
+            };
+            paths.push(coloredPath);
           }
           
-          console.log(`🎯 ${color.hex}: ${paths.length} путей извлечено`);
+          console.log(`🎯 ${color.hex}: ${paths.length} цветных путей извлечено`);
           resolve(paths);
         }
       });
