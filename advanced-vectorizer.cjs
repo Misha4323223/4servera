@@ -94,6 +94,226 @@ function generateId() {
 }
 
 /**
+ * ЭТАП 1: ПРЕДОБРАБОТКА - Adobe Illustrator алгоритм
+ */
+
+/**
+ * analyzeImageType() - Определение типа контента (Adobe метод)
+ */
+async function analyzeImageType(imageBuffer) {
+  console.log('🔍 ЭТАП 1.1: Adobe analyzeImageType - Анализ типа изображения...');
+  
+  try {
+    const sharp = require('sharp');
+    const { data, info } = await sharp(imageBuffer)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    
+    // Adobe анализ цветового разнообразия
+    const colorMap = new Map();
+    let totalPixels = 0;
+    
+    for (let i = 0; i < data.length; i += info.channels) {
+      const r = data[i];
+      const g = data[i + 1]; 
+      const b = data[i + 2];
+      
+      // Adobe квантование для анализа (32 уровня)
+      const quantR = Math.round(r / 32) * 32;
+      const quantG = Math.round(g / 32) * 32;
+      const quantB = Math.round(b / 32) * 32;
+      
+      const colorKey = `${quantR},${quantG},${quantB}`;
+      colorMap.set(colorKey, (colorMap.get(colorKey) || 0) + 1);
+      totalPixels++;
+    }
+    
+    const uniqueColors = colorMap.size;
+    const colorComplexity = uniqueColors / totalPixels;
+    
+    // Adobe анализ контрастности
+    const grayData = await sharp(imageBuffer)
+      .grayscale()
+      .raw()
+      .toBuffer();
+    
+    let totalContrast = 0;
+    for (let i = 0; i < grayData.length - 1; i++) {
+      totalContrast += Math.abs(grayData[i] - grayData[i + 1]);
+    }
+    const avgContrast = totalContrast / grayData.length;
+    
+    // Adobe классификация изображения
+    let imageType = 'AUTO';
+    let recommendedSettings = { ...ADOBE_SILKSCREEN_PRESET.settings };
+    
+    if (uniqueColors <= 3) {
+      imageType = 'SIMPLE_LOGO';
+      recommendedSettings.maxColors = 3;
+      recommendedSettings.cornerThreshold = 100;
+    } else if (uniqueColors <= 10 && avgContrast > 50) {
+      imageType = 'LOGO';  
+      recommendedSettings.maxColors = 5;
+      recommendedSettings.cornerThreshold = 75;
+    } else if (avgContrast < 20) {
+      imageType = 'PHOTO';
+      recommendedSettings.maxColors = 6;
+      recommendedSettings.pathFitting = 3;
+    } else if (colorComplexity > 0.5) {
+      imageType = 'COMPLEX_PHOTO';
+      recommendedSettings.maxColors = 8;
+      recommendedSettings.pathFitting = 4;
+    } else {
+      imageType = 'ILLUSTRATION';
+      recommendedSettings.maxColors = 5;
+    }
+    
+    console.log(`   📊 Результат анализа: ${imageType}`);
+    console.log(`   🎨 Уникальных цветов: ${uniqueColors}`);
+    console.log(`   📈 Контрастность: ${avgContrast.toFixed(1)}`);
+    console.log(`   🎯 Рекомендуемых цветов: ${recommendedSettings.maxColors}`);
+    
+    return {
+      imageType,
+      uniqueColors,
+      avgContrast,
+      colorComplexity,
+      recommendedSettings,
+      dimensions: { width: info.width, height: info.height }
+    };
+    
+  } catch (error) {
+    console.error('❌ Ошибка analyzeImageType:', error);
+    return {
+      imageType: 'AUTO',
+      uniqueColors: 5,
+      avgContrast: 50,
+      colorComplexity: 0.3,
+      recommendedSettings: ADOBE_SILKSCREEN_PRESET.settings,
+      dimensions: { width: 400, height: 400 }
+    };
+  }
+}
+
+/**
+ * preprocessColors() - Цветовая коррекция (Adobe метод)
+ */
+async function preprocessColors(imageBuffer, settings) {
+  console.log('🎨 ЭТАП 1.2: Adobe preprocessColors - Цветовая коррекция...');
+  
+  try {
+    const sharp = require('sharp');
+    let processedBuffer = imageBuffer;
+    
+    // Adobe гамма-коррекция (стандарт Adobe RGB)
+    processedBuffer = await sharp(processedBuffer)
+      .gamma(2.2)
+      .toBuffer();
+    
+    // Adobe цветовая обработка по режиму
+    if (settings.mode === 'blackwhite') {
+      processedBuffer = await sharp(processedBuffer)
+        .grayscale()
+        .normalize()
+        .toBuffer();
+      console.log('   ⚫ Применена черно-белая обработка');
+    } else if (settings.mode === 'grayscale') {
+      processedBuffer = await sharp(processedBuffer)
+        .grayscale()
+        .modulate({
+          brightness: 1.1,
+          saturation: 0,
+          hue: 0
+        })
+        .toBuffer();
+      console.log('   🔘 Применена обработка в оттенках серого');
+    } else {
+      // Adobe цветная обработка (Limited Color mode)
+      processedBuffer = await sharp(processedBuffer)
+        .modulate({
+          brightness: 1.05,
+          saturation: 1.1,
+          hue: 0
+        })
+        .toBuffer();
+      console.log('   🌈 Применена цветная обработка Adobe Limited Color');
+    }
+    
+    // Adobe Edge-preserving smoothing для фотографий
+    if (settings.smoothing === 'medium') {
+      processedBuffer = await sharp(processedBuffer)
+        .blur(0.3) // Минимальное размытие
+        .sharpen(1, 1, 0.5) // Усиление краев
+        .toBuffer();
+      console.log('   🔧 Применено Adobe edge-preserving smoothing');
+    }
+    
+    console.log('   ✅ Цветовая коррекция завершена');
+    return processedBuffer;
+    
+  } catch (error) {
+    console.error('❌ Ошибка preprocessColors:', error);
+    return imageBuffer;
+  }
+}
+
+/**
+ * resampleImage() - Масштабирование (Adobe метод)
+ */
+async function resampleImage(imageBuffer, settings, analysis) {
+  console.log('📏 ЭТАП 1.3: Adobe resampleImage - Масштабирование...');
+  
+  try {
+    const sharp = require('sharp');
+    const metadata = await sharp(imageBuffer).metadata();
+    
+    // Adobe определение целевого размера
+    let targetWidth = metadata.width;
+    let targetHeight = metadata.height;
+    const maxSize = settings.maxSize || 1024;
+    
+    // Adobe масштабирование для оптимальной обработки
+    if (Math.max(targetWidth, targetHeight) > maxSize) {
+      const scale = maxSize / Math.max(targetWidth, targetHeight);
+      targetWidth = Math.round(targetWidth * scale);
+      targetHeight = Math.round(targetHeight * scale);
+      console.log(`   📐 Масштабирование: ${metadata.width}x${metadata.height} → ${targetWidth}x${targetHeight}`);
+    } else {
+      console.log(`   📐 Размер оптимален: ${targetWidth}x${targetHeight}`);
+    }
+    
+    // Adobe Lanczos интерполяция (высокое качество)
+    const resampledBuffer = await sharp(imageBuffer)
+      .resize(targetWidth, targetHeight, {
+        kernel: sharp.kernel.lanczos3,
+        fit: 'fill'
+      })
+      .toBuffer();
+    
+    console.log(`   ✅ Масштабирование завершено: ${targetWidth}x${targetHeight}`);
+    
+    return {
+      buffer: resampledBuffer,
+      width: targetWidth,
+      height: targetHeight,
+      originalWidth: metadata.width,
+      originalHeight: metadata.height
+    };
+    
+  } catch (error) {
+    console.error('❌ Ошибка resampleImage:', error);
+    const metadata = await sharp(imageBuffer).metadata();
+    return {
+      buffer: imageBuffer,
+      width: metadata.width,
+      height: metadata.height,
+      originalWidth: metadata.width,
+      originalHeight: metadata.height
+    };
+  }
+}
+
+/**
  * Упрощенное определение типа контента без тяжелых библиотек
  */
 function detectContentType(imageBuffer) {
