@@ -129,60 +129,27 @@ function logSystemState(reason = 'periodic') {
   detailedLog(`SYSTEM STATE: PID=${process.pid}, Handles=${handles.length}, Memory=${Math.round(mem.heapUsed/1024/1024)}MB`, 'SYSTEM');
 }
 
-// Adobe векторизатор с прямой интеграцией
+// Ленивая загрузка векторизатора для предотвращения блокировки Event Loop
 function createLazyVectorizerRouter() {
   const router = express.Router();
-  let adobeVectorizer = null;
+  let realRoutes = null;
   
-  // Adobe векторизация через URL
-  router.post('/convert-url', async (req, res) => {
-    try {
-      if (!adobeVectorizer) {
-        detailedLog('🔄 Загружаем Adobe vectorizer...');
-        adobeVectorizer = require('../advanced-vectorizer.cjs');
-        detailedLog('  ✅ Adobe vectorizer загружен');
+  // Middleware для ленивой загрузки
+  router.use(async (req, res, next) => {
+    if (!realRoutes) {
+      try {
+        detailedLog('🔄 Первый запрос - загружаем vectorizer routes...');
+        const module = await import('./advanced-vectorizer-routes.js');
+        realRoutes = module.default;
+        detailedLog('  ✅ Vectorizer routes загружены по требованию');
+      } catch (error) {
+        logError('❌ ОШИБКА ленивой загрузки vectorizer routes', error);
+        return res.status(500).json({ error: 'Vectorizer temporarily unavailable' });
       }
-      
-      const { imageUrl, quality = 'silkscreen', outputFormat = 'svg' } = req.body;
-      
-      if (!imageUrl) {
-        return res.status(400).json({ error: 'imageUrl required' });
-      }
-      
-      detailedLog(`📥 Adobe векторизация: ${imageUrl}`);
-      
-      // Загружаем изображение
-      const https = require('https');
-      const imageBuffer = await new Promise((resolve, reject) => {
-        https.get(imageUrl, (response) => {
-          const chunks = [];
-          response.on('data', chunk => chunks.push(chunk));
-          response.on('end', () => resolve(Buffer.concat(chunks)));
-          response.on('error', reject);
-        }).on('error', reject);
-      });
-      
-      // Adobe векторизация
-      const svgContent = await adobeVectorizer.vectorizeImage(imageBuffer, { quality });
-      
-      detailedLog(`✅ Adobe векторизация завершена: ${svgContent.length} символов`);
-      
-      res.json({
-        success: true,
-        svg: svgContent,
-        format: outputFormat,
-        algorithm: 'Adobe Illustrator Limited Color'
-      });
-      
-    } catch (error) {
-      logError('❌ Adobe векторизация ошибка', error);
-      res.status(500).json({ error: error.message });
     }
-  });
-  
-  // Health check
-  router.get('/health', (req, res) => {
-    res.json({ status: 'ready', algorithm: 'Adobe Illustrator Image Trace' });
+    
+    // Перенаправляем на реальный роутер
+    realRoutes(req, res, next);
   });
   
   return router;

@@ -9,6 +9,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
+import fetch from 'node-fetch';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,10 +29,10 @@ if (require.cache[vectorizerPath]) {
 let advancedVectorizer;
 try {
   advancedVectorizer = require('../advanced-vectorizer.cjs');
-  console.log('  ✓ advanced-vectorizer.cjs загружен успешно');
+  console.log('  ✓ Adobe Illustrator vectorizer загружен успешно');
   console.log('  ✓ Доступные методы:', Object.keys(advancedVectorizer));
 } catch (error) {
-  console.error('❌ ОШИБКА загрузки advanced-vectorizer.cjs:', error.message);
+  console.error('❌ ОШИБКА загрузки Adobe vectorizer:', error.message);
   console.error('  Stack:', error.stack);
   process.exit(1);
 }
@@ -238,15 +239,24 @@ router.post('/convert-url', async (req, res) => {
       options
     });
 
-    // Используем исправленный Adobe алгоритм цветовой сегментации
-    console.log('🎨 CONVERT-URL: Применяем исправленный Adobe Illustrator алгоритм');
-    const result = await advancedVectorizer.vectorizeFromUrl(imageUrl, { maxColors: 6, ...options });
+    // Загружаем изображение по URL
+    console.log('📥 Загрузка изображения по URL...');
+    const fetch = require('node-fetch');
+    const response = await fetch(imageUrl);
+    const imageBuffer = await response.buffer();
     
-    // Адаптируем результат под ожидаемый формат API
-    if (result.success) {
-      result.detectedType = 'silkscreen';
-      result.filename = `vectorized_${Date.now().toString(36)}.svg`;
-    }
+    // Используем новый Adobe Illustrator алгоритм
+    console.log('🎨 CONVERT-URL: Adobe Illustrator векторизация');
+    const svgContent = await advancedVectorizer.vectorizeImage(imageBuffer, { quality: options.quality });
+    
+    const result = {
+      success: true,
+      svgContent: svgContent,
+      detectedType: 'adobe-silkscreen',
+      quality: 'Adobe Illustrator Limited Color',
+      filename: `vectorized_${Date.now().toString(36)}.svg`,
+      fileSize: Buffer.byteLength(svgContent, 'utf8')
+    };
 
     if (result.success) {
       res.json({
