@@ -425,10 +425,10 @@ async function extractDominantColors(imageBuffer, maxColors = 5) {
       // Пропускаем только полностью прозрачные пиксели
       if (info.channels === 4 && data[i + 3] < 10) continue;
       
-      // Adobe цветовая квантизация для четкого разделения
-      const quantR = Math.round(r / 32) * 32;
-      const quantG = Math.round(g / 32) * 32;
-      const quantB = Math.round(b / 32) * 32;
+      // ИСПРАВЛЕНИЕ: Adobe Limited Color квантизация для максимальной четкости
+      const quantR = Math.round(r / 51) * 51; // 5 уровней (0, 51, 102, 153, 204, 255)
+      const quantG = Math.round(g / 51) * 51;
+      const quantB = Math.round(b / 51) * 51;
       
       const colorKey = `${quantR},${quantG},${quantB}`;
       const count = colorMap.get(colorKey) || 0;
@@ -464,16 +464,25 @@ async function extractDominantColors(imageBuffer, maxColors = 5) {
         };
       });
 
-    // Фильтруем и выбираем лучшие цвета для печати
+    // ИСПРАВЛЕНИЕ: Adobe-стиль фильтрация для получения четких контрастных цветов
     const filteredColors = [];
-    const minColorDistance = 80; // Минимальное расстояние между цветами
-    const minCoverage = 1.0; // Минимальное покрытие 1%
+    const minColorDistance = 120; // Увеличенное расстояние для четкого контраста
+    const minCoverage = 0.5; // Уменьшенное покрытие для захвата деталей
 
     for (const color of allColors) {
       if (filteredColors.length >= maxColors) break;
       if (color.percentage < minCoverage) continue;
 
-      // Проверяем, достаточно ли цвет отличается от уже выбранных
+      // Особая обработка для очень контрастных цветов (черный/белый)
+      const isExtremeColor = (color.r + color.g + color.b < 30) || (color.r + color.g + color.b > 720);
+      
+      if (isExtremeColor) {
+        // Всегда включаем крайние цвета (черный/белый)
+        filteredColors.push(color);
+        continue;
+      }
+
+      // Проверяем достаточность отличия от уже выбранных
       const isDistinct = filteredColors.every(existingColor => {
         const distance = Math.sqrt(
           Math.pow(color.r - existingColor.r, 2) +
@@ -1081,8 +1090,8 @@ async function createAdobeLimitedColorSVG(imageBuffer, settings) {
     
     console.log(`📐 Размеры: ${width}x${height}`);
     
-    // Adobe использует кластеризацию цветов K-means
-    const dominantColors = await extractAdobeColors(imageBuffer, settings.maxColors);
+    // ИСПРАВЛЕНИЕ: Используем улучшенную функцию extractDominantColors
+    const dominantColors = await extractDominantColors(imageBuffer, settings.maxColors);
     
     if (!dominantColors || dominantColors.length === 0) {
       console.log('❌ K-means сбой, принудительно создаем базовые цвета для шелкографии');
@@ -1331,13 +1340,14 @@ async function createAdobeColorMask(imageBuffer, targetColor, settings) {
     
     const maskData = Buffer.alloc(info.width * info.height);
     
-    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Адаптивный допуск для сохранения деталей
-    let tolerance = 50; // Увеличенный базовый допуск
+    // ADOBE-СОВМЕСТИМЫЕ ДОПУСКИ: Более широкие для захвата всех деталей
+    let tolerance = 100; // Существенно увеличенный базовый допуск
     
-    // Адаптация допуска в зависимости от яркости цвета
+    // Адаптация допуска для разных типов цветов (как в Adobe Limited Color)
     const brightness = (targetColor.r + targetColor.g + targetColor.b) / 3;
-    if (brightness < 80) tolerance = 70; // Темные цвета - больший допуск
-    if (brightness > 200) tolerance = 60; // Светлые цвета
+    if (brightness < 60) tolerance = 120; // Темные цвета - максимальный допуск
+    if (brightness > 200) tolerance = 110; // Светлые цвета - большой допуск
+    if (brightness >= 60 && brightness <= 200) tolerance = 130; // Средние тона - самый большой допуск
     
     console.log(`🔧 ДИАГНОСТИКА: Допуск для ${targetColor.hex}: ${tolerance} (яркость: ${brightness.toFixed(1)})`);
     console.log(`🔧 ДИАГНОСТИКА: Целевой цвет RGB(${targetColor.r}, ${targetColor.g}, ${targetColor.b})`);
@@ -1370,8 +1380,11 @@ async function createAdobeColorMask(imageBuffer, targetColor, settings) {
       
       const pixelIndex = Math.floor(i / info.channels);
       
-      // Улучшенное условие включения - захватываем больше деталей
-      if (euclideanDistance <= tolerance || (maxDelta <= tolerance * 0.7)) {
+      // ADOBE-СТИЛЬ: Более мягкие условия включения для захвата всех деталей
+      if (euclideanDistance <= tolerance || (maxDelta <= tolerance * 0.8) || 
+          (Math.abs(r - targetColor.r) <= tolerance * 0.6 && 
+           Math.abs(g - targetColor.g) <= tolerance * 0.6 && 
+           Math.abs(b - targetColor.b) <= tolerance * 0.6)) {
         maskData[pixelIndex] = 255;
         pixelCount++;
       } else {
@@ -1404,8 +1417,8 @@ async function createAdobeColorMask(imageBuffer, targetColor, settings) {
     console.log(`📊 ДИАГНОСТИКА: Из первых 50 пикселей ${matchingSamples} совпадают с цветом ${targetColor.hex}`);
     
     
-    // Понижаем минимальное покрытие для сохранения мелких деталей
-    if (coverage < 0.02) {
+    // ADOBE-СОВМЕСТИМЫЙ ПОРОГ: Более низкий для сохранения всех деталей
+    if (coverage < 0.005) {
       console.log(`⚠️ Критически малое покрытие для ${targetColor.hex}: ${coverage.toFixed(3)}%`);
       return null;
     }
