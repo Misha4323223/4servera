@@ -20,21 +20,25 @@ async function handleVectorizerCommand(message, sessionId, res, previousImage) {
       console.log('🖼️ [VECTORIZER-CHAT] Используем предыдущее изображение');
     } else {
       // Ищем изображение в истории сессии
-      const { getSessionMessages } = require('./chat-history.ts');
-      const messages = await getSessionMessages(sessionId);
-      
-      if (messages && messages.length > 0) {
-        for (let i = messages.length - 1; i >= 0; i--) {
-          const msg = messages[i];
-          if (msg.sender === 'ai' && msg.text) {
-            const imageMatch = msg.text.match(/https:\/\/image\.pollinations\.ai\/prompt\/[^\s\)]+/);
-            if (imageMatch) {
-              imageUrl = imageMatch[0];
-              console.log('🔍 [VECTORIZER-CHAT] Найдено изображение в истории');
-              break;
+      try {
+        const { getSessionMessages } = require('./chat-history');
+        const messages = await getSessionMessages(sessionId);
+        
+        if (messages && messages.length > 0) {
+          for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i];
+            if (msg.sender === 'ai' && msg.text) {
+              const imageMatch = msg.text.match(/https:\/\/image\.pollinations\.ai\/prompt\/[^\s\)]+/);
+              if (imageMatch) {
+                imageUrl = imageMatch[0];
+                console.log('🔍 [VECTORIZER-CHAT] Найдено изображение в истории');
+                break;
+              }
             }
           }
         }
+      } catch (historyError) {
+        console.log('⚠️ [VECTORIZER-CHAT] Ошибка доступа к истории чата:', historyError.message);
       }
     }
     
