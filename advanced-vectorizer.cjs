@@ -643,6 +643,46 @@ function extractSVGPaths(svgContent) {
 }
 
 /**
+ * Нормализация координат SVG пути для правильного отображения в viewBox
+ */
+function normalizePathCoordinates(pathData, sourceMinX, sourceMinY, sourceMaxX, sourceMaxY, targetWidth, targetHeight) {
+  try {
+    const sourceWidth = sourceMaxX - sourceMinX;
+    const sourceHeight = sourceMaxY - sourceMinY;
+    
+    // Вычисляем масштаб с отступами
+    const padding = 40;
+    const scaleX = (targetWidth - padding * 2) / sourceWidth;
+    const scaleY = (targetHeight - padding * 2) / sourceHeight;
+    const scale = Math.min(scaleX, scaleY, 1); // Не увеличиваем больше 100%
+    
+    // Центрируем изображение
+    const offsetX = (targetWidth - sourceWidth * scale) / 2;
+    const offsetY = (targetHeight - sourceHeight * scale) / 2;
+    
+    // Трансформируем все координаты в пути
+    return pathData.replace(/([ML])\s*([\d.-]+)\s*([\d.-]+)/g, (match, command, x, y) => {
+      const newX = (parseFloat(x) - sourceMinX) * scale + offsetX;
+      const newY = (parseFloat(y) - sourceMinY) * scale + offsetY;
+      return `${command} ${newX.toFixed(2)} ${newY.toFixed(2)}`;
+    }).replace(/([C])\s*([\d.-]+)\s*([\d.-]+)\s*([\d.-]+)\s*([\d.-]+)\s*([\d.-]+)\s*([\d.-]+)/g, 
+      (match, command, x1, y1, x2, y2, x3, y3) => {
+        const newX1 = (parseFloat(x1) - sourceMinX) * scale + offsetX;
+        const newY1 = (parseFloat(y1) - sourceMinY) * scale + offsetY;
+        const newX2 = (parseFloat(x2) - sourceMinX) * scale + offsetX;
+        const newY2 = (parseFloat(y2) - sourceMinY) * scale + offsetY;
+        const newX3 = (parseFloat(x3) - sourceMinX) * scale + offsetX;
+        const newY3 = (parseFloat(y3) - sourceMinY) * scale + offsetY;
+        return `${command} ${newX1.toFixed(2)} ${newY1.toFixed(2)}, ${newX2.toFixed(2)} ${newY2.toFixed(2)}, ${newX3.toFixed(2)} ${newY3.toFixed(2)}`;
+      });
+    
+  } catch (error) {
+    console.error('Ошибка нормализации координат:', error);
+    return pathData; // Возвращаем исходный путь при ошибке
+  }
+}
+
+/**
  * ЭТАП 4: Объединение цветных слоев в финальный многослойный SVG
  */
 async function combineColorLayers(colorLayers, originalImageBuffer) {
@@ -744,7 +784,7 @@ async function combineColorLayers(colorLayers, originalImageBuffer) {
       console.log(`🎨 ЭТАП 4.${layerNumber}: Добавляем слой для цвета ${layer.color}`);
       console.log(`   - Путей в слое: ${layer.paths.length}`);
       
-      svgContent += `  <g id="color-${layerNumber}" class="vector-layer" fill="${layer.color}" stroke="none" transform="translate(${offsetX - minX * scale}, ${offsetY - minY * scale}) scale(${scale})">\n`;
+      svgContent += `  <g id="color-${layerNumber}" class="vector-layer" fill="${layer.color}" stroke="none">\n`;
       
       let validPaths = 0;
       let layerPaths = 0;
@@ -761,7 +801,9 @@ async function combineColorLayers(colorLayers, originalImageBuffer) {
           break;
         }
         
-        svgContent += `    <path d="${path}" />\n`;
+        // Нормализуем координаты пути для правильного отображения
+        const normalizedPath = normalizePathCoordinates(path, minX, minY, maxX, maxY, optimizedWidth, optimizedHeight);
+        svgContent += `    <path d="${normalizedPath}" />\n`;
         validPaths++;
         layerPaths++;
         totalPaths++;
