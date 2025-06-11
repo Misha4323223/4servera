@@ -3574,6 +3574,42 @@ class StreamVectorizer {
     }
   }
   
+  // ДОБАВЛЕННЫЕ МЕТОДЫ ДЛЯ СОВМЕСТИМОСТИ
+  async processImage() {
+    console.log('🔄 processImage() - делегирование к process()');
+    return await this.process();
+  }
+  
+  async createPath(contours, color) {
+    console.log('🛤️ createPath() - создание SVG пути');
+    if (!contours || contours.length === 0) return '';
+    
+    let pathData = '';
+    contours.forEach(contour => {
+      if (contour.length > 0) {
+        pathData += `M${contour[0].x},${contour[0].y}`;
+        for (let i = 1; i < contour.length; i++) {
+          pathData += `L${contour[i].x},${contour[i].y}`;
+        }
+        pathData += 'Z';
+      }
+    });
+    
+    return `<path d="${pathData}" fill="${color.hex}" />`;
+  }
+  
+  async generateColorPalette(imageBuffer, maxColors = 5) {
+    console.log('🎨 generateColorPalette() - извлечение цветовой палитры');
+    try {
+      const colors = await extractAdobeColors(imageBuffer || this.imageBuffer, maxColors);
+      this.globalColorPalette = colors;
+      return colors;
+    } catch (error) {
+      console.error('Ошибка generateColorPalette:', error);
+      return [];
+    }
+  }
+  
   async initializeImage() {
     // Получение информации об изображении без полной загрузки
     const sharp = require('sharp');

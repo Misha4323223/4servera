@@ -227,7 +227,8 @@ function isVectorizerCommand(message) {
     'сделай векторным',
     'преобразуй в вектор',
     'svg из изображения',
-    'векторная графика'
+    'векторная графика',
+    'создай svg'
   ];
   
   const messageLower = message.toLowerCase();
@@ -268,9 +269,25 @@ function extractVectorizerSettings(message) {
   return settings;
 }
 
+/**
+ * Извлекает URL изображения из сообщения
+ */
+function extractImageUrl(message) {
+  // Поиск URL изображений Pollinations
+  const pollinationsMatch = message.match(/https:\/\/image\.pollinations\.ai\/prompt\/[^\s]+/);
+  if (pollinationsMatch) return pollinationsMatch[0];
+  
+  // Поиск других URL изображений
+  const imageUrlMatch = message.match(/https?:\/\/[^\s]+\.(jpg|jpeg|png|gif|bmp|webp)/i);
+  if (imageUrlMatch) return imageUrlMatch[0];
+  
+  return null;
+}
+
 module.exports = {
   handleVectorizerCommand,
   isVectorizerCommand,
+  extractImageUrl,
   extractVectorizerSettings,
   sendStreamMessage
 };
