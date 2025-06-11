@@ -342,8 +342,8 @@ async function createSilkscreenSVG(imageBuffer, settings) {
       const color = optimizedColors[i];
       console.log(`\n🔍 ЭТАП 3.${i + 1}: Обрабатываем цвет ${color.hex} (${color.percentage}%)`);
       
-      // Создаем маску для этого цвета
-      const colorMask = await createColorMask(imageBuffer, color, settings);
+      // Создаем маску для этого цвета с диагностикой
+      const colorMask = await createAdobeColorMask(imageBuffer, color, settings);
       
       if (colorMask) {
         console.log(`🎯 ЭТАП 3.${i + 1}: Маска создана, запускаем векторизацию...`);
