@@ -3,13 +3,11 @@
  * REST API endpoints для векторизации изображений
  */
 
-import express from 'express';
-import multer from 'multer';
-import path from 'path';
-import fs from 'fs/promises';
-import { fileURLToPath } from 'url';
-import { createRequire } from 'module';
-import fetch from 'node-fetch';
+const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs').promises;
+const fetch = require('node-fetch');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -494,4 +492,4 @@ router.get('/health', async (req, res) => {
 // Применяем обработчик ошибок векторизации ко всем маршрутам
 router.use(handleVectorizerError);
 
-export default router;
+module.exports = router;
