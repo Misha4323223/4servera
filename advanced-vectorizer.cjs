@@ -1312,8 +1312,8 @@ async function createAdobeColorMask(imageBuffer, targetColor, settings) {
     
     const maskData = Buffer.alloc(info.width * info.height);
     
-    // Adobe использует адаптивный допуск для шелкографии
-    const tolerance = 80; // Увеличенный допуск для извлечения большего количества цветов
+    // Adobe использует строгий допуск для четкого разделения цветов
+    const tolerance = 25; // Строгий допуск для четкой цветовой сегментации
     
     let pixelCount = 0;
     
@@ -1345,7 +1345,7 @@ async function createAdobeColorMask(imageBuffer, targetColor, settings) {
     const coverage = (pixelCount / (info.width * info.height)) * 100;
     
     // Adobe отбрасывает цвета с очень малым покрытием (понижаем порог)
-    if (coverage < 0.5) {
+    if (coverage < 0.1) {
       console.log(`⚠️ Недостаточное покрытие для ${targetColor.hex}: ${coverage.toFixed(1)}%`);
       return null;
     }
