@@ -3798,7 +3798,13 @@ class StreamVectorizer {
     this.progressTracker.updateStepProgress(100, `SVG: ${Math.round(optimizedSVG.length / 1024)}KB`);
     this.progressTracker.completeStep();
     
-    return optimizedSVG;
+    return {
+      svgContent: optimizedSVG,
+      fileSize: optimizedSVG.length,
+      colorCount: this.globalColorPalette ? this.globalColorPalette.length : 0,
+      contourCount: this.globalContours ? this.globalContours.length : 0,
+      processingTime: Date.now() - this.progressTracker.startTime
+    };
   }
   
   // Вспомогательные методы для потоковой обработки
