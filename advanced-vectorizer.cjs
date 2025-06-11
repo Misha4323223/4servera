@@ -827,6 +827,313 @@ async function createEdgeMap(imageBuffer) {
   }
 }
 
+// ================================================================
+// ЭТАП 3: СОЗДАНИЕ МАСОК (Adobe Illustrator Image Trace Algorithm)
+// ================================================================
+
+/**
+ * createColorMasks() - Создание цветовых масок для каждого цвета палитры
+ * Точная реализация Adobe Illustrator метода создания масок
+ */
+async function createColorMasks(imageBuffer, colorPalette, settings = {}) {
+  console.log(`🎭 ЭТАП 3.1: Adobe createColorMasks - Создание ${colorPalette.length} цветовых масок...`);
+  
+  try {
+    const sharp = require('sharp');
+    const { data, info } = await sharp(imageBuffer)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    
+    // Валидация входных данных
+    if (!data || data.length === 0 || !info || !info.width || !info.height || !colorPalette || colorPalette.length === 0) {
+      throw new Error('Невалидные данные для createColorMasks');
+    }
+    
+    const masks = [];
+    const tolerance = settings.colorTolerance || 45; // Adobe стандартный tolerance
+    
+    console.log(`   🎯 Tolerance для масок: ${tolerance}`);
+    
+    // Создаем маску для каждого цвета в палитре
+    for (let colorIndex = 0; colorIndex < colorPalette.length; colorIndex++) {
+      const targetColor = colorPalette[colorIndex];
+      console.log(`   🔍 Создание маски для цвета ${colorIndex + 1}/${colorPalette.length}: ${targetColor.hex}`);
+      
+      const maskData = new Uint8Array(info.width * info.height);
+      let pixelCount = 0;
+      
+      // Adobe color matching algorithm
+      for (let y = 0; y < info.height; y++) {
+        for (let x = 0; x < info.width; x++) {
+          const pixelIndex = y * info.width + x;
+          const dataIndex = pixelIndex * info.channels;
+          
+          const r = data[dataIndex] || 0;
+          const g = data[dataIndex + 1] || 0;
+          const b = data[dataIndex + 2] || 0;
+          
+          // Adobe перцептивное цветовое расстояние
+          const deltaR = r - targetColor.r;
+          const deltaG = g - targetColor.g;
+          const deltaB = b - targetColor.b;
+          
+          // Weighted Euclidean distance (как в Adobe)
+          const colorDistance = Math.sqrt(
+            0.30 * deltaR * deltaR +  // Red weight
+            0.59 * deltaG * deltaG +  // Green weight 
+            0.11 * deltaB * deltaB    // Blue weight
+          );
+          
+          // Проверка попадания в tolerance
+          if (colorDistance <= tolerance) {
+            maskData[pixelIndex] = 255; // Белый = принадлежит цвету
+            pixelCount++;
+          } else {
+            maskData[pixelIndex] = 0;   // Черный = не принадлежит
+          }
+        }
+      }
+      
+      const coverage = (pixelCount / (info.width * info.height)) * 100;
+      console.log(`     ✅ Маска создана: ${pixelCount} пикселей (${coverage.toFixed(1)}%)`);
+      
+      masks.push({
+        colorIndex,
+        color: targetColor,
+        maskData: maskData,
+        pixelCount,
+        coverage,
+        width: info.width,
+        height: info.height
+      });
+    }
+    
+    console.log(`   🎭 Создано ${masks.length} цветовых масок`);
+    return masks;
+    
+  } catch (error) {
+    console.error('❌ Ошибка createColorMasks:', error);
+    return [];
+  }
+}
+
+/**
+ * createBinaryMasks() - Создание бинарных масок с пороговой обработкой
+ * Adobe Illustrator бинарная сегментация для четких краев
+ */
+async function createBinaryMasks(imageBuffer, threshold = 128, settings = {}) {
+  console.log(`⚫ ЭТАП 3.2: Adobe createBinaryMasks - Пороговая сегментация (threshold: ${threshold})...`);
+  
+  try {
+    const sharp = require('sharp');
+    
+    // Конвертация в grayscale для бинарной обработки
+    const { data, info } = await sharp(imageBuffer)
+      .grayscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    
+    // Валидация данных
+    if (!data || data.length === 0 || !info || !info.width || !info.height) {
+      throw new Error('Невалидные данные для createBinaryMasks');
+    }
+    
+    // Adobe adaptive thresholding
+    const adaptiveThreshold = settings.adaptiveThreshold !== false;
+    let finalThreshold = threshold;
+    
+    if (adaptiveThreshold) {
+      // Вычисление оптимального порога (Otsu method как в Adobe)
+      const histogram = new Array(256).fill(0);
+      
+      // Построение гистограммы
+      for (let i = 0; i < data.length; i++) {
+        histogram[data[i]]++;
+      }
+      
+      // Otsu's method для автоматического порога
+      let sum = 0;
+      for (let i = 0; i < 256; i++) {
+        sum += i * histogram[i];
+      }
+      
+      let sumB = 0;
+      let wB = 0;
+      let maximum = 0.0;
+      
+      for (let t = 0; t < 256; t++) {
+        wB += histogram[t];
+        if (wB === 0) continue;
+        
+        const wF = data.length - wB;
+        if (wF === 0) break;
+        
+        sumB += t * histogram[t];
+        const mB = sumB / wB;
+        const mF = (sum - sumB) / wF;
+        
+        const varBetween = wB * wF * (mB - mF) * (mB - mF);
+        
+        if (varBetween > maximum) {
+          finalThreshold = t;
+          maximum = varBetween;
+        }
+      }
+      
+      console.log(`   🎯 Adobe Otsu threshold: ${finalThreshold} (исходный: ${threshold})`);
+    }
+    
+    // Создание бинарных масок
+    const foregroundMask = new Uint8Array(info.width * info.height);
+    const backgroundMask = new Uint8Array(info.width * info.height);
+    
+    let foregroundPixels = 0;
+    let backgroundPixels = 0;
+    
+    for (let i = 0; i < data.length; i++) {
+      const brightness = data[i];
+      
+      if (brightness >= finalThreshold) {
+        foregroundMask[i] = 255; // Передний план (светлый)
+        backgroundMask[i] = 0;
+        foregroundPixels++;
+      } else {
+        foregroundMask[i] = 0;
+        backgroundMask[i] = 255;  // Задний план (темный)
+        backgroundPixels++;
+      }
+    }
+    
+    const foregroundCoverage = (foregroundPixels / data.length) * 100;
+    const backgroundCoverage = (backgroundPixels / data.length) * 100;
+    
+    console.log(`   ⚫ Передний план: ${foregroundPixels} пикселей (${foregroundCoverage.toFixed(1)}%)`);
+    console.log(`   ⚪ Задний план: ${backgroundPixels} пикселей (${backgroundCoverage.toFixed(1)}%)`);
+    
+    return {
+      foreground: {
+        maskData: foregroundMask,
+        pixelCount: foregroundPixels,
+        coverage: foregroundCoverage,
+        width: info.width,
+        height: info.height,
+        threshold: finalThreshold
+      },
+      background: {
+        maskData: backgroundMask,
+        pixelCount: backgroundPixels,
+        coverage: backgroundCoverage,
+        width: info.width,
+        height: info.height,
+        threshold: finalThreshold
+      }
+    };
+    
+  } catch (error) {
+    console.error('❌ Ошибка createBinaryMasks:', error);
+    return null;
+  }
+}
+
+/**
+ * refineMasks() - Рафинирование масок с морфологическими операциями
+ * Adobe Illustrator post-processing для улучшения качества масок
+ */
+async function refineMasks(masks, settings = {}) {
+  console.log(`✨ ЭТАП 3.3: Adobe refineMasks - Морфологическая обработка ${masks.length} масок...`);
+  
+  try {
+    if (!masks || masks.length === 0) {
+      throw new Error('Нет масок для обработки');
+    }
+    
+    const refinedMasks = [];
+    const kernelSize = settings.kernelSize || 3; // Размер морфологического ядра
+    const iterations = settings.iterations || 1;  // Количество итераций
+    
+    console.log(`   🔧 Параметры: ядро ${kernelSize}x${kernelSize}, итераций: ${iterations}`);
+    
+    for (let maskIndex = 0; maskIndex < masks.length; maskIndex++) {
+      const mask = masks[maskIndex];
+      console.log(`   🎭 Обработка маски ${maskIndex + 1}/${masks.length}...`);
+      
+      // Создаем копию маски для обработки
+      let processedMask = new Uint8Array(mask.maskData);
+      const { width, height } = mask;
+      
+      // Морфологические операции (opening + closing)
+      for (let iter = 0; iter < iterations; iter++) {
+        // 1. Erosion (сужение)
+        const erodedMask = new Uint8Array(width * height);
+        
+        for (let y = 1; y < height - 1; y++) {
+          for (let x = 1; x < width - 1; x++) {
+            const centerIndex = y * width + x;
+            let minValue = 255;
+            
+            // Проверяем окрестность
+            for (let ky = -1; ky <= 1; ky++) {
+              for (let kx = -1; kx <= 1; kx++) {
+                const neighborIndex = (y + ky) * width + (x + kx);
+                minValue = Math.min(minValue, processedMask[neighborIndex]);
+              }
+            }
+            
+            erodedMask[centerIndex] = minValue;
+          }
+        }
+        
+        // 2. Dilation (расширение)
+        const dilatedMask = new Uint8Array(width * height);
+        
+        for (let y = 1; y < height - 1; y++) {
+          for (let x = 1; x < width - 1; x++) {
+            const centerIndex = y * width + x;
+            let maxValue = 0;
+            
+            // Проверяем окрестность
+            for (let ky = -1; ky <= 1; ky++) {
+              for (let kx = -1; kx <= 1; kx++) {
+                const neighborIndex = (y + ky) * width + (x + kx);
+                maxValue = Math.max(maxValue, erodedMask[neighborIndex]);
+              }
+            }
+            
+            dilatedMask[centerIndex] = maxValue;
+          }
+        }
+        
+        processedMask = dilatedMask;
+      }
+      
+      // Подсчет финальных пикселей
+      let finalPixelCount = 0;
+      for (let i = 0; i < processedMask.length; i++) {
+        if (processedMask[i] > 0) finalPixelCount++;
+      }
+      
+      const finalCoverage = (finalPixelCount / (width * height)) * 100;
+      
+      console.log(`     ✅ Обработана: ${finalPixelCount} пикселей (${finalCoverage.toFixed(1)}%, было ${mask.coverage.toFixed(1)}%)`);
+      
+      refinedMasks.push({
+        ...mask,
+        maskData: processedMask,
+        pixelCount: finalPixelCount,
+        coverage: finalCoverage,
+        refined: true
+      });
+    }
+    
+    console.log(`   ✨ Рафинирование завершено для ${refinedMasks.length} масок`);
+    return refinedMasks;
+    
+  } catch (error) {
+    console.error('❌ Ошибка refineMasks:', error);
+    return masks; // Возвращаем исходные маски при ошибке
+  }
+}
+
 /**
  * Упрощенное определение типа контента без тяжелых библиотек
  */
@@ -922,19 +1229,39 @@ async function silkscreenVectorize(imageBuffer, options = {}) {
     
     const settings = { ...ADOBE_SILKSCREEN_PRESET.settings };
     
-    // Adobe-совместимая предобработка
+    // ЭТАП 1: Предобработка изображения
     const processedBuffer = await preprocessImageForAdobe(imageBuffer, settings);
     
-    // Автоматическое определение порога как в Adobe Illustrator
+    // ЭТАП 2: Цветовая сегментация
+    console.log(`🎨 ЭТАП 2: Выполнение цветовой сегментации...`);
+    const colorPalette = await performKMeansSegmentation(processedBuffer, settings.maxColors);
+    console.log(`🎯 Получена палитра из ${colorPalette.length} цветов`);
+    
+    // ЭТАП 3: Создание масок
+    console.log(`🎭 ЭТАП 3: Создание цветовых масок...`);
+    const colorMasks = await createColorMasks(processedBuffer, colorPalette, settings);
+    
+    // Дополнительное создание бинарных масок для контраста
+    const binaryMasks = await createBinaryMasks(processedBuffer, settings.threshold || 128, settings);
+    
+    // Рафинирование всех масок
+    const refinedColorMasks = await refineMasks(colorMasks, { kernelSize: 3, iterations: 1 });
+    
+    console.log(`✅ ЭТАП 3 завершен: создано ${refinedColorMasks.length} цветовых масок`);
+    
+    // Автоматическое определение порога
     const optimalThreshold = await calculateAdobeThreshold(processedBuffer);
     settings.threshold = optimalThreshold;
     console.log(`🎯 Adobe автоматический порог: ${optimalThreshold}`);
     
-    // Limited Color режим - точная цветовая векторизация
-    console.log(`🎨 ПРИНУДИТЕЛЬНЫЙ ВЫЗОВ: createAdobeLimitedColorSVG`);
-    console.log(`📋 Settings для Adobe:`, JSON.stringify(settings));
+    // Передача масок в векторизацию
+    console.log(`🎨 ПЕРЕХОД К ВЕКТОРИЗАЦИИ с подготовленными масками`);
     
-    const svgContent = await createAdobeLimitedColorSVG(processedBuffer, settings);
+    const svgContent = await createAdobeLimitedColorSVG(processedBuffer, settings, {
+      colorPalette,
+      colorMasks: refinedColorMasks,
+      binaryMasks
+    });
     
     console.log(`📄 Результат SVG длина: ${svgContent ? svgContent.length : 0}`);
     console.log(`🔍 SVG начинается с:`, svgContent ? svgContent.substring(0, 200) : 'ПУСТО');
