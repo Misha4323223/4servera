@@ -393,6 +393,9 @@ async function performKMeansSegmentation(imageBuffer, numColors) {
       throw new Error('Невалидные данные для K-means');
     }
     
+    // Ограничение для шелкографии
+    numColors = Math.min(numColors, 5);
+    
     // Adobe инициализация центроидов (улучшенный метод K-means++)
     const centroids = [];
     const pixels = [];
@@ -404,6 +407,12 @@ async function performKMeansSegmentation(imageBuffer, numColors) {
         g: data[i + 1] || 0,
         b: data[i + 2] || 0
       });
+    }
+    
+    // Защита от случая когда пикселей меньше чем цветов
+    if (pixels.length < numColors) {
+      console.log(`   ⚠️ Пикселей (${pixels.length}) меньше чем цветов (${numColors}), корректируем`);
+      numColors = Math.max(1, pixels.length);
     }
     
     // K-means++ инициализация для лучшего распределения центроидов
@@ -424,13 +433,20 @@ async function performKMeansSegmentation(imageBuffer, numColors) {
       });
       
       const totalDistance = distances.reduce((sum, d) => sum + d, 0);
-      let random = Math.random() * totalDistance;
       
-      for (let i = 0; i < distances.length; i++) {
-        random -= distances[i];
-        if (random <= 0) {
-          centroids.push({ ...pixels[i] });
-          break;
+      // Защита от зацикливания при одинаковых пикселях
+      if (totalDistance === 0) {
+        // Добавляем случайный пиксель если все пиксели одинаковые
+        centroids.push({ ...pixels[Math.floor(Math.random() * pixels.length)] });
+      } else {
+        let random = Math.random() * totalDistance;
+        
+        for (let i = 0; i < distances.length; i++) {
+          random -= distances[i];
+          if (random <= 0) {
+            centroids.push({ ...pixels[i] });
+            break;
+          }
         }
       }
     }
@@ -479,7 +495,7 @@ async function performKMeansSegmentation(imageBuffer, numColors) {
         clusters[bestCluster].sumB += pixel.b;
       }
       
-      // Обновление центроидов
+      // Обновление центроидов с защитой от пустых кластеров
       let totalMovement = 0;
       for (let c = 0; c < numColors; c++) {
         if (clusters[c].pixels.length > 0) {
@@ -498,6 +514,13 @@ async function performKMeansSegmentation(imageBuffer, numColors) {
           centroids[c].r = newR;
           centroids[c].g = newG;
           centroids[c].b = newB;
+        } else {
+          // Защита от пустых кластеров - переназначаем случайный пиксель
+          const randomPixel = pixels[Math.floor(Math.random() * pixels.length)];
+          centroids[c].r = randomPixel.r;
+          centroids[c].g = randomPixel.g;
+          centroids[c].b = randomPixel.b;
+          console.log(`   ⚠️ Кластер ${c} пустой, переназначен случайный центроид`);
         }
       }
       
@@ -547,6 +570,9 @@ async function adaptiveColorReduction(imageBuffer, maxColors) {
   console.log(`🔧 ЭТАП 2.2: Adobe adaptiveColorReduction - Сокращение до ${maxColors} цветов...`);
   
   try {
+    // Ограничение для шелкографии
+    maxColors = Math.min(maxColors, 5);
+    
     const sharp = require('sharp');
     const { data, info } = await sharp(imageBuffer)
       .raw()
@@ -603,7 +629,7 @@ async function adaptiveColorReduction(imageBuffer, maxColors) {
         }
       }
       
-      if (!merged && mergedColors.length < maxColors) {
+      if (!merged) {
         mergedColors.push({ r, g, b, frequency });
       }
     }
@@ -640,8 +666,12 @@ async function edgeAwareQuantization(imageBuffer, edges, maxColors) {
   console.log(`⚡ ЭТАП 2.3: Adobe edgeAwareQuantization - Квантование с сохранением краев...`);
   
   try {
+    // Ограничение для шелкографии
+    maxColors = Math.min(maxColors, 5);
+    
     const sharp = require('sharp');
     const { data, info } = await sharp(imageBuffer)
+      .resize(800, 800, { fit: 'inside' }) // Оптимизация производительности
       .raw()
       .toBuffer({ resolveWithObject: true });
     
@@ -736,6 +766,13 @@ async function createEdgeMap(imageBuffer) {
       .toBuffer({ resolveWithObject: true });
     
     const { data, info } = grayResult;
+    
+    // Валидация размеров для Sobel
+    if (!data || !info || info.width < 3 || info.height < 3) {
+      console.log('   ⚠️ Изображение слишком мало для Sobel edge detection');
+      return new Array(info.width * info.height).fill(0);
+    }
+    
     const edgeMap = new Array(info.width * info.height).fill(0);
     
     // Sobel edge detection
