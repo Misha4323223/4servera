@@ -113,15 +113,18 @@ async function analyzeImageType(imageBuffer) {
     const colorMap = new Map();
     let totalPixels = 0;
     
+    // Проверка количества каналов (RGB/RGBA)
+    const channels = Math.min(info.channels, 3); // Используем только RGB
+    
     for (let i = 0; i < data.length; i += info.channels) {
-      const r = data[i];
-      const g = data[i + 1]; 
-      const b = data[i + 2];
+      const r = data[i] || 0;
+      const g = data[i + 1] || 0; 
+      const b = data[i + 2] || 0;
       
-      // Adobe квантование для анализа (32 уровня)
-      const quantR = Math.round(r / 32) * 32;
-      const quantG = Math.round(g / 32) * 32;
-      const quantB = Math.round(b / 32) * 32;
+      // Adobe квантование для анализа (16 уровней = более точное)
+      const quantR = Math.round(r / 16) * 16;
+      const quantG = Math.round(g / 16) * 16;
+      const quantB = Math.round(b / 16) * 16;
       
       const colorKey = `${quantR},${quantG},${quantB}`;
       colorMap.set(colorKey, (colorMap.get(colorKey) || 0) + 1);
@@ -131,17 +134,48 @@ async function analyzeImageType(imageBuffer) {
     const uniqueColors = colorMap.size;
     const colorComplexity = uniqueColors / totalPixels;
     
-    // Adobe анализ контрастности
-    const grayData = await sharp(imageBuffer)
+    // Adobe анализ контрастности (пространственный Sobel)
+    const grayResult = await sharp(imageBuffer)
       .grayscale()
       .raw()
-      .toBuffer();
+      .toBuffer({ resolveWithObject: true });
+    
+    const grayData = grayResult.data;
+    const grayInfo = grayResult.info;
     
     let totalContrast = 0;
-    for (let i = 0; i < grayData.length - 1; i++) {
-      totalContrast += Math.abs(grayData[i] - grayData[i + 1]);
+    let contrastPixels = 0;
+    
+    // Sobel edge detection для правильного анализа контрастности
+    for (let y = 1; y < grayInfo.height - 1; y++) {
+      for (let x = 1; x < grayInfo.width - 1; x++) {
+        const idx = y * grayInfo.width + x;
+        
+        // Sobel X gradient
+        const gx = 
+          -1 * grayData[(y-1) * grayInfo.width + (x-1)] +
+          -2 * grayData[y * grayInfo.width + (x-1)] +
+          -1 * grayData[(y+1) * grayInfo.width + (x-1)] +
+          1 * grayData[(y-1) * grayInfo.width + (x+1)] +
+          2 * grayData[y * grayInfo.width + (x+1)] +
+          1 * grayData[(y+1) * grayInfo.width + (x+1)];
+        
+        // Sobel Y gradient
+        const gy = 
+          -1 * grayData[(y-1) * grayInfo.width + (x-1)] +
+          -2 * grayData[(y-1) * grayInfo.width + x] +
+          -1 * grayData[(y-1) * grayInfo.width + (x+1)] +
+          1 * grayData[(y+1) * grayInfo.width + (x-1)] +
+          2 * grayData[(y+1) * grayInfo.width + x] +
+          1 * grayData[(y+1) * grayInfo.width + (x+1)];
+        
+        const magnitude = Math.sqrt(gx * gx + gy * gy);
+        totalContrast += magnitude;
+        contrastPixels++;
+      }
     }
-    const avgContrast = totalContrast / grayData.length;
+    
+    const avgContrast = contrastPixels > 0 ? totalContrast / contrastPixels / 255 * 100 : 0;
     
     // Adobe классификация изображения
     let imageType = 'AUTO';
@@ -302,14 +336,25 @@ async function resampleImage(imageBuffer, settings, analysis) {
     
   } catch (error) {
     console.error('❌ Ошибка resampleImage:', error);
-    const metadata = await sharp(imageBuffer).metadata();
-    return {
-      buffer: imageBuffer,
-      width: metadata.width,
-      height: metadata.height,
-      originalWidth: metadata.width,
-      originalHeight: metadata.height
-    };
+    try {
+      const metadata = await sharp(imageBuffer).metadata();
+      return {
+        buffer: imageBuffer,
+        width: metadata.width,
+        height: metadata.height,
+        originalWidth: metadata.width,
+        originalHeight: metadata.height
+      };
+    } catch (metadataError) {
+      console.error('❌ Критическая ошибка metadata:', metadataError);
+      return {
+        buffer: imageBuffer,
+        width: 400,
+        height: 400,
+        originalWidth: 400,
+        originalHeight: 400
+      };
+    }
   }
 }
 
