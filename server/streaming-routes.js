@@ -84,7 +84,7 @@ module.exports = async function apiChatStream(req, res) {
     }
 
     // Проверяем команду векторизации
-    const { isVectorizerCommand, handleVectorizerCommand } = require('./vectorizer-chat-integration.js');
+    const { isVectorizerCommand, handleVectorizerCommand } = require('./vectorizer-chat-integration.cjs');
     const isDirectVectorizerRequest = isVectorizerCommand(message);
     
     if (isDirectVectorizerRequest) {
