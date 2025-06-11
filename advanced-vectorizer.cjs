@@ -372,6 +372,409 @@ async function resampleImage(imageBuffer, settings, analysis) {
 }
 
 /**
+ * ЭТАП 2: ЦВЕТОВАЯ СЕГМЕНТАЦИЯ - Adobe Illustrator алгоритм
+ */
+
+/**
+ * performKMeansSegmentation() - K-means кластеризация (Adobe метод)
+ */
+async function performKMeansSegmentation(imageBuffer, numColors) {
+  console.log(`🧮 ЭТАП 2.1: Adobe K-means - Сегментация на ${numColors} цветов...`);
+  
+  try {
+    const sharp = require('sharp');
+    const { data, info } = await sharp(imageBuffer)
+      .resize(400, 400, { fit: 'inside' }) // Оптимизация для K-means
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    
+    // Валидация данных
+    if (!data || data.length === 0 || numColors < 1) {
+      throw new Error('Невалидные данные для K-means');
+    }
+    
+    // Adobe инициализация центроидов (улучшенный метод K-means++)
+    const centroids = [];
+    const pixels = [];
+    
+    // Сбор пикселей
+    for (let i = 0; i < data.length; i += info.channels) {
+      pixels.push({
+        r: data[i] || 0,
+        g: data[i + 1] || 0,
+        b: data[i + 2] || 0
+      });
+    }
+    
+    // K-means++ инициализация для лучшего распределения центроидов
+    centroids.push(pixels[Math.floor(Math.random() * pixels.length)]);
+    
+    for (let c = 1; c < numColors; c++) {
+      const distances = pixels.map(pixel => {
+        let minDistance = Infinity;
+        for (const centroid of centroids) {
+          const distance = Math.sqrt(
+            Math.pow(pixel.r - centroid.r, 2) +
+            Math.pow(pixel.g - centroid.g, 2) +
+            Math.pow(pixel.b - centroid.b, 2)
+          );
+          minDistance = Math.min(minDistance, distance);
+        }
+        return minDistance;
+      });
+      
+      const totalDistance = distances.reduce((sum, d) => sum + d, 0);
+      let random = Math.random() * totalDistance;
+      
+      for (let i = 0; i < distances.length; i++) {
+        random -= distances[i];
+        if (random <= 0) {
+          centroids.push({ ...pixels[i] });
+          break;
+        }
+      }
+    }
+    
+    console.log(`   🎯 Инициализированы ${centroids.length} центроидов`);
+    
+    // Adobe K-means итерации с улучшенной конвергенцией
+    let maxIterations = 50;
+    let convergenceThreshold = 1.0;
+    
+    for (let iter = 0; iter < maxIterations; iter++) {
+      const clusters = Array(numColors).fill().map(() => ({ 
+        pixels: [], 
+        sumR: 0, 
+        sumG: 0, 
+        sumB: 0 
+      }));
+      
+      // Назначение пикселей к кластерам
+      for (const pixel of pixels) {
+        let minDistance = Infinity;
+        let bestCluster = 0;
+        
+        for (let c = 0; c < numColors; c++) {
+          // Adobe перцептивное расстояние
+          const dr = pixel.r - centroids[c].r;
+          const dg = pixel.g - centroids[c].g;
+          const db = pixel.b - centroids[c].b;
+          
+          // Weighted Euclidean distance для лучшего восприятия
+          const distance = Math.sqrt(
+            0.30 * dr * dr +  // Red weight
+            0.59 * dg * dg +  // Green weight  
+            0.11 * db * db    // Blue weight
+          );
+          
+          if (distance < minDistance) {
+            minDistance = distance;
+            bestCluster = c;
+          }
+        }
+        
+        clusters[bestCluster].pixels.push(pixel);
+        clusters[bestCluster].sumR += pixel.r;
+        clusters[bestCluster].sumG += pixel.g;
+        clusters[bestCluster].sumB += pixel.b;
+      }
+      
+      // Обновление центроидов
+      let totalMovement = 0;
+      for (let c = 0; c < numColors; c++) {
+        if (clusters[c].pixels.length > 0) {
+          const newR = clusters[c].sumR / clusters[c].pixels.length;
+          const newG = clusters[c].sumG / clusters[c].pixels.length;
+          const newB = clusters[c].sumB / clusters[c].pixels.length;
+          
+          const movement = Math.sqrt(
+            Math.pow(newR - centroids[c].r, 2) +
+            Math.pow(newG - centroids[c].g, 2) +
+            Math.pow(newB - centroids[c].b, 2)
+          );
+          
+          totalMovement += movement;
+          
+          centroids[c].r = newR;
+          centroids[c].g = newG;
+          centroids[c].b = newB;
+        }
+      }
+      
+      console.log(`   📊 Итерация ${iter + 1}: движение = ${totalMovement.toFixed(2)}`);
+      
+      if (totalMovement < convergenceThreshold) {
+        console.log(`   ✅ Конвергенция достигнута на итерации ${iter + 1}`);
+        break;
+      }
+    }
+    
+    // Создание финальной палитры
+    const finalPalette = centroids.map((centroid, index) => ({
+      r: Math.round(Math.max(0, Math.min(255, centroid.r))),
+      g: Math.round(Math.max(0, Math.min(255, centroid.g))),
+      b: Math.round(Math.max(0, Math.min(255, centroid.b))),
+      index
+    })).map(color => ({
+      ...color,
+      hex: `#${color.r.toString(16).padStart(2, '0')}${color.g.toString(16).padStart(2, '0')}${color.b.toString(16).padStart(2, '0')}`
+    }));
+    
+    console.log(`   🎨 Создана палитра из ${finalPalette.length} цветов:`);
+    finalPalette.forEach((color, i) => {
+      console.log(`      ${i + 1}. ${color.hex} (RGB: ${color.r}, ${color.g}, ${color.b})`);
+    });
+    
+    return finalPalette;
+    
+  } catch (error) {
+    console.error('❌ Ошибка performKMeansSegmentation:', error);
+    // Безопасная палитра по умолчанию
+    return Array(Math.min(numColors, 5)).fill().map((_, i) => ({
+      r: [0, 85, 170, 255, 128][i] || 128,
+      g: [0, 85, 170, 255, 128][i] || 128,
+      b: [0, 85, 170, 255, 128][i] || 128,
+      hex: ['#000000', '#555555', '#aaaaaa', '#ffffff', '#808080'][i] || '#808080',
+      index: i
+    }));
+  }
+}
+
+/**
+ * adaptiveColorReduction() - Адаптивное сокращение цветов (Adobe метод)
+ */
+async function adaptiveColorReduction(imageBuffer, maxColors) {
+  console.log(`🔧 ЭТАП 2.2: Adobe adaptiveColorReduction - Сокращение до ${maxColors} цветов...`);
+  
+  try {
+    const sharp = require('sharp');
+    const { data, info } = await sharp(imageBuffer)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    
+    // Анализ гистограммы цветов
+    const colorHistogram = new Map();
+    
+    for (let i = 0; i < data.length; i += info.channels) {
+      const r = data[i] || 0;
+      const g = data[i + 1] || 0;
+      const b = data[i + 2] || 0;
+      
+      // Adobe квантование для группировки похожих цветов
+      const quantR = Math.round(r / 8) * 8;
+      const quantG = Math.round(g / 8) * 8;
+      const quantB = Math.round(b / 8) * 8;
+      
+      const colorKey = `${quantR},${quantG},${quantB}`;
+      colorHistogram.set(colorKey, (colorHistogram.get(colorKey) || 0) + 1);
+    }
+    
+    // Сортировка по частоте использования
+    const sortedColors = Array.from(colorHistogram.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, maxColors * 2); // Берем больше для анализа
+    
+    console.log(`   📈 Найдено ${sortedColors.length} доминирующих цветов`);
+    
+    // Группировка близких цветов (Adobe color merging)
+    const mergedColors = [];
+    const mergeThreshold = 30; // Порог для объединения близких цветов
+    
+    for (const [colorStr, frequency] of sortedColors) {
+      const [r, g, b] = colorStr.split(',').map(Number);
+      
+      let merged = false;
+      for (const existing of mergedColors) {
+        const distance = Math.sqrt(
+          Math.pow(r - existing.r, 2) +
+          Math.pow(g - existing.g, 2) +
+          Math.pow(b - existing.b, 2)
+        );
+        
+        if (distance < mergeThreshold) {
+          // Объединяем цвета по весу частоты
+          const totalFreq = existing.frequency + frequency;
+          existing.r = Math.round((existing.r * existing.frequency + r * frequency) / totalFreq);
+          existing.g = Math.round((existing.g * existing.frequency + g * frequency) / totalFreq);
+          existing.b = Math.round((existing.b * existing.frequency + b * frequency) / totalFreq);
+          existing.frequency = totalFreq;
+          merged = true;
+          break;
+        }
+      }
+      
+      if (!merged && mergedColors.length < maxColors) {
+        mergedColors.push({ r, g, b, frequency });
+      }
+    }
+    
+    // Финальная палитра
+    const reducedPalette = mergedColors.slice(0, maxColors).map((color, index) => ({
+      r: Math.round(Math.max(0, Math.min(255, color.r))),
+      g: Math.round(Math.max(0, Math.min(255, color.g))),
+      b: Math.round(Math.max(0, Math.min(255, color.b))),
+      frequency: color.frequency,
+      index
+    })).map(color => ({
+      ...color,
+      hex: `#${color.r.toString(16).padStart(2, '0')}${color.g.toString(16).padStart(2, '0')}${color.b.toString(16).padStart(2, '0')}`
+    }));
+    
+    console.log(`   🎯 Адаптивное сокращение завершено: ${reducedPalette.length} цветов`);
+    reducedPalette.forEach((color, i) => {
+      console.log(`      ${i + 1}. ${color.hex} (частота: ${color.frequency})`);
+    });
+    
+    return reducedPalette;
+    
+  } catch (error) {
+    console.error('❌ Ошибка adaptiveColorReduction:', error);
+    return [];
+  }
+}
+
+/**
+ * edgeAwareQuantization() - Квантование с сохранением краев (Adobe метод)
+ */
+async function edgeAwareQuantization(imageBuffer, edges, maxColors) {
+  console.log(`⚡ ЭТАП 2.3: Adobe edgeAwareQuantization - Квантование с сохранением краев...`);
+  
+  try {
+    const sharp = require('sharp');
+    const { data, info } = await sharp(imageBuffer)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    
+    // Создание карты краев если не предоставлена
+    let edgeMap = edges;
+    if (!edgeMap) {
+      console.log('   🔍 Создаем карту краев...');
+      edgeMap = await createEdgeMap(imageBuffer);
+    }
+    
+    // Adobe адаптивное квантование
+    const colorClusters = new Map();
+    
+    for (let y = 0; y < info.height; y++) {
+      for (let x = 0; x < info.width; x++) {
+        const pixelIndex = y * info.width + x;
+        const dataIndex = pixelIndex * info.channels;
+        
+        const r = data[dataIndex] || 0;
+        const g = data[dataIndex + 1] || 0;
+        const b = data[dataIndex + 2] || 0;
+        
+        // Адаптивные пороги на основе силы краев
+        const edgeStrength = edgeMap[pixelIndex] || 0;
+        const quantLevel = edgeStrength > 0.3 ? 16 : 32; // Более точное квантование на краях
+        
+        const quantR = Math.round(r / quantLevel) * quantLevel;
+        const quantG = Math.round(g / quantLevel) * quantLevel;
+        const quantB = Math.round(b / quantLevel) * quantLevel;
+        
+        const colorKey = `${quantR},${quantG},${quantB}`;
+        if (!colorClusters.has(colorKey)) {
+          colorClusters.set(colorKey, {
+            r: quantR,
+            g: quantG,
+            b: quantB,
+            count: 0,
+            edgeWeight: 0
+          });
+        }
+        
+        const cluster = colorClusters.get(colorKey);
+        cluster.count++;
+        cluster.edgeWeight += edgeStrength;
+      }
+    }
+    
+    // Сортировка по важности (частота + вес краев)
+    const sortedClusters = Array.from(colorClusters.values())
+      .map(cluster => ({
+        ...cluster,
+        importance: cluster.count + cluster.edgeWeight * 100 // Края важнее
+      }))
+      .sort((a, b) => b.importance - a.importance)
+      .slice(0, maxColors);
+    
+    // Создание финальной палитры
+    const quantizedPalette = sortedClusters.map((cluster, index) => ({
+      r: Math.round(Math.max(0, Math.min(255, cluster.r))),
+      g: Math.round(Math.max(0, Math.min(255, cluster.g))),
+      b: Math.round(Math.max(0, Math.min(255, cluster.b))),
+      count: cluster.count,
+      edgeWeight: cluster.edgeWeight,
+      index
+    })).map(color => ({
+      ...color,
+      hex: `#${color.r.toString(16).padStart(2, '0')}${color.g.toString(16).padStart(2, '0')}${color.b.toString(16).padStart(2, '0')}`
+    }));
+    
+    console.log(`   ⚡ Edge-aware квантование завершено: ${quantizedPalette.length} цветов`);
+    quantizedPalette.forEach((color, i) => {
+      console.log(`      ${i + 1}. ${color.hex} (пикселей: ${color.count}, края: ${color.edgeWeight.toFixed(1)})`);
+    });
+    
+    return quantizedPalette;
+    
+  } catch (error) {
+    console.error('❌ Ошибка edgeAwareQuantization:', error);
+    return [];
+  }
+}
+
+/**
+ * createEdgeMap() - Создание карты краев для edge-aware обработки
+ */
+async function createEdgeMap(imageBuffer) {
+  try {
+    const sharp = require('sharp');
+    const grayResult = await sharp(imageBuffer)
+      .grayscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    
+    const { data, info } = grayResult;
+    const edgeMap = new Array(info.width * info.height).fill(0);
+    
+    // Sobel edge detection
+    for (let y = 1; y < info.height - 1; y++) {
+      for (let x = 1; x < info.width - 1; x++) {
+        const idx = y * info.width + x;
+        
+        // Sobel X kernel
+        const gx = 
+          -1 * data[(y-1) * info.width + (x-1)] +
+          -2 * data[y * info.width + (x-1)] +
+          -1 * data[(y+1) * info.width + (x-1)] +
+          1 * data[(y-1) * info.width + (x+1)] +
+          2 * data[y * info.width + (x+1)] +
+          1 * data[(y+1) * info.width + (x+1)];
+        
+        // Sobel Y kernel  
+        const gy =
+          -1 * data[(y-1) * info.width + (x-1)] +
+          -2 * data[(y-1) * info.width + x] +
+          -1 * data[(y-1) * info.width + (x+1)] +
+          1 * data[(y+1) * info.width + (x-1)] +
+          2 * data[(y+1) * info.width + x] +
+          1 * data[(y+1) * info.width + (x+1)];
+        
+        const magnitude = Math.sqrt(gx * gx + gy * gy) / 255;
+        edgeMap[idx] = Math.min(1, magnitude);
+      }
+    }
+    
+    return edgeMap;
+    
+  } catch (error) {
+    console.error('❌ Ошибка createEdgeMap:', error);
+    return [];
+  }
+}
+
+/**
  * Упрощенное определение типа контента без тяжелых библиотек
  */
 function detectContentType(imageBuffer) {
