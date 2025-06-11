@@ -958,16 +958,24 @@ async function createAdobeLimitedColorSVG(imageBuffer, settings) {
   <desc>Generated with Adobe Illustrator Image Trace compatible algorithm</desc>
 `;
     
-    // Обрабатываем каждый цвет как отдельный слой
+    // Принудительная обработка каждого цвета
+    console.log(`🎨 НАЧИНАЕМ ОБРАБОТКУ ${dominantColors.length} ЦВЕТОВ:`);
+    dominantColors.forEach((color, index) => {
+      console.log(`  ${index + 1}. ${color.hex} (${color.percentage}%)`);
+    });
+    
+    let processedColors = 0;
+    
     for (let i = 0; i < dominantColors.length; i++) {
       const color = dominantColors[i];
-      console.log(`🔍 Обработка цвета ${i + 1}/${dominantColors.length}: ${color.hex}`);
+      console.log(`🔍 ЭТАП ${i + 1}: Обработка цвета ${color.hex}`);
       
       // Создаем маску для цвета
       const colorMask = await createAdobeColorMask(imageBuffer, color, settings);
+      console.log(`🖼️ Маска для ${color.hex}: ${colorMask ? 'СОЗДАНА' : 'НЕ СОЗДАНА'}`);
       
       if (colorMask) {
-        console.log(`🎨 Обрабатываем цвет ${i + 1}/${dominantColors.length}: ${color.hex}`);
+        console.log(`🎨 УСПЕШНО: Обрабатываем цвет ${i + 1}/${dominantColors.length}: ${color.hex}`);
         
         // Векторизуем маску с Adobe параметрами
         const paths = await vectorizeAdobeMask(colorMask, color, settings);
@@ -989,6 +997,7 @@ async function createAdobeLimitedColorSVG(imageBuffer, settings) {
           
           svgContent += `  </g>\n`;
           console.log(`✅ Добавлено ${addedPaths} путей для ${color.hex} (из ${limitedPaths.length} обработанных)`);
+          processedColors++;
         } else {
           console.log(`❌ Нет путей для ${color.hex}`);
         }
@@ -999,8 +1008,10 @@ async function createAdobeLimitedColorSVG(imageBuffer, settings) {
     
     svgContent += `</svg>`;
     
-    const finalSize = svgContent.length / 1024;
-    console.log(`📊 Adobe SVG готов: ${finalSize.toFixed(1)}KB`);
+    console.log(`📊 ФИНАЛЬНЫЙ ОТЧЕТ ОБРАБОТКИ:`);
+    console.log(`  • Заявлено цветов: ${dominantColors.length}`);
+    console.log(`  • Успешно обработано: ${processedColors}`);
+    console.log(`  • SVG размер: ${(svgContent.length / 1024).toFixed(1)}KB`);
     
     return svgContent;
     
@@ -1075,11 +1086,24 @@ function performKMeans(pixels, k) {
   
   console.log(`🔬 performKMeans: Кластеризация ${pixels.length} пикселей на ${k} кластеров`);
   
-  // Инициализация центроидов
+  // Инициализация центроидов с разнообразием цветов
   let centroids = [];
+  
+  // Добавляем основные цвета для шелкографии
+  const baseColors = [
+    { r: 0, g: 0, b: 0, weight: 0 },      // Черный
+    { r: 255, g: 255, b: 255, weight: 0 }, // Белый
+    { r: 128, g: 128, b: 128, weight: 0 }, // Серый
+    { r: 64, g: 64, b: 64, weight: 0 }     // Темно-серый
+  ];
+  
   for (let i = 0; i < k; i++) {
-    const randomPixel = pixels[Math.floor(Math.random() * pixels.length)];
-    centroids.push({ ...randomPixel, weight: 0 });
+    if (i < baseColors.length) {
+      centroids.push({ ...baseColors[i] });
+    } else {
+      const randomPixel = pixels[Math.floor(Math.random() * pixels.length)];
+      centroids.push({ ...randomPixel, weight: 0 });
+    }
   }
   
   console.log(`🎯 Инициализировано ${centroids.length} центроидов`);
@@ -1122,8 +1146,10 @@ function performKMeans(pixels, k) {
     });
   }
   
-  // Возвращаем только непустые кластеры
-  return centroids.filter(c => c.weight > 1);
+  // Возвращаем все кластеры с минимальным весом для шелкографии
+  const validCentroids = centroids.filter(c => c.weight > 0.1);
+  console.log(`🎨 K-means итоговых цветов: ${validCentroids.length} из ${centroids.length}`);
+  return validCentroids;
 }
 
 /**
