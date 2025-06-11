@@ -420,10 +420,10 @@ async function extractDominantColors(imageBuffer, maxColors = 5) {
       // Пропускаем только полностью прозрачные пиксели
       if (info.channels === 4 && data[i + 3] < 10) continue;
       
-      // Мягкая квантизация для сохранения цветовых нюансов
-      const quantR = Math.round(r / 4) * 4;
-      const quantG = Math.round(g / 4) * 4;
-      const quantB = Math.round(b / 4) * 4;
+      // Adobe цветовая квантизация для четкого разделения
+      const quantR = Math.round(r / 32) * 32;
+      const quantG = Math.round(g / 32) * 32;
+      const quantB = Math.round(b / 32) * 32;
       
       const colorKey = `${quantR},${quantG},${quantB}`;
       const count = colorMap.get(colorKey) || 0;
@@ -521,9 +521,9 @@ async function createColorMask(imageBuffer, targetColor, settings) {
     
     const maskData = Buffer.alloc(info.width * info.height);
     
-    // Adobe Illustrator цветовая сегментация - строгое разделение
-    const baseTolerance = 15; // Adobe использует строгое разделение цветов
-    const adaptiveTolerance = baseTolerance; // Без дополнительных бонусов
+    // Adobe цветовая сегментация с расширенным допуском
+    const baseTolerance = 60; // Увеличиваем допуск для захвата всех оттенков цвета
+    const adaptiveTolerance = baseTolerance;
     
     console.log(`🎯 Используется адаптивный допуск: ${adaptiveTolerance}`);
     
