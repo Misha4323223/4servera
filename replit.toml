@@ -2,7 +2,7 @@
 command = "npm run dev"
 
 [workflows]
-"Start application" = "npm run dev"
+"Start application" = "npm run dev:all"
 
 [deployment]
 run = ["npm", "run", "start"]
