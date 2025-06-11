@@ -860,6 +860,28 @@
       max-height: 100px;
       border-radius: 8px;
       border: 1px solid var(--border);
+      object-fit: contain;
+    }
+    
+    /* Адаптивные размеры превью изображений */
+    @media (max-width: 640px) {
+      .image-preview-container {
+        max-width: 260px !important;
+      }
+      
+      .image-preview-container img {
+        max-height: 220px !important;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      .image-preview-container {
+        max-width: 240px !important;
+      }
+      
+      .image-preview-container img {
+        max-height: 200px !important;
+      }
     }
     
     .remove-image {
@@ -2418,10 +2440,10 @@
             const svgPreview = `
               <div style="margin: 15px 0; text-align: center;">
                 <div style="font-size: 11px; color: #666; margin-bottom: 8px; font-weight: 500;">🎨 SVG Превью</div>
-                <div style="max-width: 300px; margin: 0 auto; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                <div class="image-preview-container" style="max-width: 280px; margin: 0 auto; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.1); background: #f8f9fa;">
                   <img src="${dataUri}" 
                        alt="SVG векторное изображение" 
-                       style="width: 100%; height: auto; max-height: 300px; display: block;"
+                       style="width: 100%; height: auto; max-height: 250px; display: block; object-fit: contain;"
                        onload="console.log('✅ [SVG] Изображение загружено')" 
                        onerror="console.error('❌ [SVG] Ошибка загрузки'); this.style.display='none'; this.nextElementSibling.style.display='block';">
                   <div style="display: none; padding: 20px; background: #f0f0f0; color: #666; text-align: center;">
@@ -2449,7 +2471,7 @@
         // Обрабатываем изображения ![alt](url) - ПОСЛЕ обработки переносов строк
         html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function(match, alt, url) {
           console.log('🖼️ [HTML] Обрабатываем изображение:', { alt, url });
-          return `<div style="margin: 15px 0; text-align: center;"><img src="${url}" alt="${alt || 'Изображение'}" style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-height: 400px;" onload="console.log('✅ [HTML] Изображение загружено:', '${url}')" onerror="console.error('❌ [HTML] Ошибка загрузки изображения:', '${url}'); this.style.display='none'; this.nextElementSibling.style.display='block';"><div style="display: none; padding: 10px; background: rgba(255,0,0,0.1); border-radius: 4px; color: #ff6b6b;">❌ Не удалось загрузить изображение</div>${alt ? `<p style="margin-top: 8px; font-size: 0.9rem; color: #888;">${alt}</p>` : ''}</div>`;
+          return `<div style="margin: 15px 0; text-align: center;"><div class="image-preview-container" style="max-width: 280px; margin: 0 auto; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.1); background: #f8f9fa;"><img src="${url}" alt="${alt || 'Изображение'}" style="width: 100%; height: auto; max-height: 250px; display: block; object-fit: contain;" onload="console.log('✅ [HTML] Изображение загружено:', '${url}')" onerror="console.error('❌ [HTML] Ошибка загрузки изображения:', '${url}'); this.style.display='none'; this.nextElementSibling.style.display='block';"><div style="display: none; padding: 10px; background: rgba(255,0,0,0.1); border-radius: 4px; color: #ff6b6b;">❌ Не удалось загрузить изображение</div></div>${alt ? `<p style="margin-top: 8px; font-size: 0.9rem; color: #888;">${alt}</p>` : ''}</div>`;
         });
         
         // Обрабатываем обычные ссылки [текст](url)
