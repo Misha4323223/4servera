@@ -3262,25 +3262,90 @@ class StreamVectorizer {
   async runPreprocessing(imageInfo) {
     this.progressTracker.startStep(0, 'Предобработка и разбивка на tiles');
     
-    // Предварительная обработка - пока заглушка
-    this.progressTracker.updateStepProgress(50, 'Оптимизация изображения');
+    const sharp = require('sharp');
     
-    // Подготовка к разбивке
-    this.progressTracker.updateStepProgress(100, `Создано ${this.tileProcessor.tiles.length} tiles`);
+    // Adobe-совместимая предобработка
+    this.progressTracker.updateStepProgress(25, 'Adobe предобработка');
+    
+    let processedBuffer = this.imageBuffer;
+    
+    // Уменьшение размера если необходимо (как в Adobe Illustrator)
+    if (imageInfo.width > 4000 || imageInfo.height > 4000) {
+      const maxSize = 3000;
+      const scale = Math.min(maxSize / imageInfo.width, maxSize / imageInfo.height);
+      
+      processedBuffer = await sharp(processedBuffer)
+        .resize(Math.round(imageInfo.width * scale), Math.round(imageInfo.height * scale), {
+          kernel: sharp.kernel.lanczos3,
+          fit: 'inside'
+        })
+        .toBuffer();
+        
+      console.log(`   📐 Масштабирование: ${imageInfo.width}×${imageInfo.height} → ${Math.round(imageInfo.width * scale)}×${Math.round(imageInfo.height * scale)}`);
+    }
+    
+    this.progressTracker.updateStepProgress(50, 'Нормализация изображения');
+    
+    // Adobe Illustrator стиль обработки
+    this.processedBuffer = await sharp(processedBuffer)
+      .sharpen(1.2, 1.0, 1.5) // Увеличение резкости
+      .normalise() // Нормализация контраста
+      .modulate({ 
+        brightness: 1.05,
+        saturation: 1.1,
+        hue: 0
+      })
+      .removeAlpha()
+      .png()
+      .toBuffer();
+    
+    // Получение финальных размеров
+    const processedMetadata = await sharp(this.processedBuffer).metadata();
+    this.finalImageInfo = {
+      width: processedMetadata.width,
+      height: processedMetadata.height,
+      channels: processedMetadata.channels
+    };
+    
+    // Пересоздание TileProcessor с финальными размерами
+    this.tileProcessor = new TileProcessor(this.finalImageInfo, this.options);
+    
+    this.progressTracker.updateStepProgress(100, `Готово ${this.tileProcessor.tiles.length} tiles`);
     this.progressTracker.completeStep();
   }
   
   async runColorSegmentation() {
     this.progressTracker.startStep(1, 'Глобальная цветовая сегментация');
     
-    // Глобальная сегментация - пока заглушка
-    this.globalColorPalette = [
-      { hex: '#8a1143', count: 1000 },
-      { hex: '#003345', count: 5000 },
-      { hex: '#02121c', count: 3000 },
-      { hex: '#004e5f', count: 2000 },
-      { hex: '#007883', count: 1500 }
-    ];
+    const sharp = require('sharp');
+    
+    // Выборка пикселей для K-means (каждый 4-й пиксель для экономии памяти)
+    this.progressTracker.updateStepProgress(25, 'Извлечение образцов цветов');
+    
+    const { data, info } = await sharp(this.processedBuffer)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    
+    const samplePixels = [];
+    const step = 4; // Каждый 4-й пиксель
+    
+    for (let y = 0; y < info.height; y += step) {
+      for (let x = 0; x < info.width; x += step) {
+        const idx = (y * info.width + x) * info.channels;
+        samplePixels.push({
+          r: data[idx],
+          g: data[idx + 1], 
+          b: data[idx + 2]
+        });
+      }
+    }
+    
+    console.log(`   🎨 Извлечено ${samplePixels.length} образцов пикселей`);
+    
+    this.progressTracker.updateStepProgress(50, 'K-means кластеризация');
+    
+    // K-means кластеризация на образцах
+    this.globalColorPalette = await this.performStreamKMeans(samplePixels, this.options.maxColors);
     
     this.progressTracker.updateStepProgress(100, `Палитра: ${this.globalColorPalette.length} цветов`);
     this.progressTracker.completeStep();
@@ -3289,15 +3354,38 @@ class StreamVectorizer {
   async runMaskCreation() {
     this.progressTracker.startStep(2, 'Создание масок по tiles');
     
-    // Обработка масок по tiles - пока заглушка
+    const sharp = require('sharp');
+    this.tileMasks = new Map();
+    
+    // Обработка каждого tile
     for (let i = 0; i < this.tileProcessor.tiles.length; i++) {
       const tile = this.tileProcessor.tiles[i];
       const progress = Math.round(((i + 1) / this.tileProcessor.tiles.length) * 100);
       
       this.progressTracker.updateStepProgress(progress, `Tile ${i + 1}/${this.tileProcessor.tiles.length}`);
       
-      // Имитация обработки
-      await new Promise(resolve => setTimeout(resolve, 10));
+      // Извлечение данных tile
+      const tileBuffer = await sharp(this.processedBuffer)
+        .extract({ 
+          left: tile.x, 
+          top: tile.y, 
+          width: tile.width, 
+          height: tile.height 
+        })
+        .raw()
+        .toBuffer();
+      
+      // Создание масок для каждого цвета в этом tile
+      const tileMasks = await this.createTileMasks(tileBuffer, tile, this.globalColorPalette);
+      this.tileMasks.set(tile.id, tileMasks);
+      
+      // Очистка временных данных
+      this.memoryManager.cleanup(tileBuffer);
+      
+      // Принудительная очистка каждые 10 tiles
+      if ((i + 1) % 10 === 0) {
+        this.memoryManager.forceCleanup();
+      }
     }
     
     this.progressTracker.completeStep();
@@ -3334,6 +3422,171 @@ class StreamVectorizer {
     this.progressTracker.completeStep();
     
     return mockSVG;
+  }
+  
+  // Вспомогательные методы для потоковой обработки
+  
+  async performStreamKMeans(samplePixels, maxColors) {
+    console.log(`   🧮 K-means кластеризация на ${samplePixels.length} образцах для ${maxColors} цветов`);
+    
+    // Инициализация центроидов
+    const centroids = [];
+    for (let i = 0; i < maxColors; i++) {
+      const randomIndex = Math.floor(Math.random() * samplePixels.length);
+      centroids.push({ ...samplePixels[randomIndex] });
+    }
+    
+    const maxIterations = 20;
+    let iteration = 0;
+    let converged = false;
+    
+    while (iteration < maxIterations && !converged) {
+      // Назначение пикселей к центроидам
+      const clusters = Array(maxColors).fill().map(() => []);
+      
+      for (const pixel of samplePixels) {
+        let minDistance = Infinity;
+        let closestCentroid = 0;
+        
+        for (let c = 0; c < centroids.length; c++) {
+          const distance = Math.sqrt(
+            Math.pow(pixel.r - centroids[c].r, 2) +
+            Math.pow(pixel.g - centroids[c].g, 2) +
+            Math.pow(pixel.b - centroids[c].b, 2)
+          );
+          
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestCentroid = c;
+          }
+        }
+        
+        clusters[closestCentroid].push(pixel);
+      }
+      
+      // Обновление центроидов
+      let totalMovement = 0;
+      for (let c = 0; c < centroids.length; c++) {
+        if (clusters[c].length > 0) {
+          const oldCentroid = { ...centroids[c] };
+          
+          centroids[c].r = Math.round(clusters[c].reduce((sum, p) => sum + p.r, 0) / clusters[c].length);
+          centroids[c].g = Math.round(clusters[c].reduce((sum, p) => sum + p.g, 0) / clusters[c].length);
+          centroids[c].b = Math.round(clusters[c].reduce((sum, p) => sum + p.b, 0) / clusters[c].length);
+          
+          const movement = Math.sqrt(
+            Math.pow(centroids[c].r - oldCentroid.r, 2) +
+            Math.pow(centroids[c].g - oldCentroid.g, 2) +
+            Math.pow(centroids[c].b - oldCentroid.b, 2)
+          );
+          totalMovement += movement;
+        }
+      }
+      
+      console.log(`     📊 Итерация ${iteration + 1}: движение = ${totalMovement.toFixed(2)}`);
+      
+      if (totalMovement < 1.0) {
+        converged = true;
+        console.log(`     ✅ Конвергенция достигнута на итерации ${iteration + 1}`);
+      }
+      
+      iteration++;
+    }
+    
+    // Финальное назначение пикселей для подсчета
+    const finalClusters = Array(maxColors).fill().map(() => []);
+    for (const pixel of samplePixels) {
+      let minDistance = Infinity;
+      let closestCentroid = 0;
+      
+      for (let c = 0; c < centroids.length; c++) {
+        const distance = Math.sqrt(
+          Math.pow(pixel.r - centroids[c].r, 2) +
+          Math.pow(pixel.g - centroids[c].g, 2) +
+          Math.pow(pixel.b - centroids[c].b, 2)
+        );
+        
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestCentroid = c;
+        }
+      }
+      
+      finalClusters[closestCentroid].push(pixel);
+    }
+    
+    // Конвертация в hex и подсчет
+    const colorPalette = centroids.map((centroid, index) => {
+      const hex = this.rgbToHex(centroid.r, centroid.g, centroid.b);
+      const count = finalClusters[index] ? finalClusters[index].length : 0;
+      
+      return {
+        hex,
+        r: centroid.r,
+        g: centroid.g,
+        b: centroid.b,
+        count
+      };
+    }).filter(color => color.count > 0);
+    
+    console.log(`   🎨 Финальная палитра из ${colorPalette.length} цветов:`);
+    colorPalette.forEach((color, i) => {
+      console.log(`      ${i + 1}. ${color.hex} (RGB: ${color.r}, ${color.g}, ${color.b}) - ${color.count} пикселей`);
+    });
+    
+    return colorPalette;
+  }
+  
+  async createTileMasks(tileBuffer, tile, colorPalette) {
+    const tileMasks = {};
+    const tolerance = 45; // Adobe стандарт
+    
+    // Создание маски для каждого цвета
+    for (let colorIndex = 0; colorIndex < colorPalette.length; colorIndex++) {
+      const color = colorPalette[colorIndex];
+      const maskData = this.memoryManager.allocateArray(tile.width * tile.height, 'Uint8Array');
+      
+      // Заполнение маски
+      for (let y = 0; y < tile.height; y++) {
+        for (let x = 0; x < tile.width; x++) {
+          const pixelIndex = (y * tile.width + x) * 3; // RGB
+          const maskIndex = y * tile.width + x;
+          
+          if (pixelIndex + 2 < tileBuffer.length) {
+            const r = tileBuffer[pixelIndex];
+            const g = tileBuffer[pixelIndex + 1];
+            const b = tileBuffer[pixelIndex + 2];
+            
+            // Расчет расстояния до цвета палитры
+            const distance = Math.sqrt(
+              Math.pow(r - color.r, 2) +
+              Math.pow(g - color.g, 2) +
+              Math.pow(b - color.b, 2)
+            );
+            
+            maskData[maskIndex] = distance <= tolerance ? 255 : 0;
+          }
+        }
+      }
+      
+      tileMasks[color.hex] = {
+        data: maskData,
+        width: tile.width,
+        height: tile.height,
+        color: color,
+        pixelCount: maskData.filter(pixel => pixel === 255).length
+      };
+    }
+    
+    return tileMasks;
+  }
+  
+  rgbToHex(r, g, b) {
+    const toHex = (c) => {
+      const hex = Math.max(0, Math.min(255, Math.round(c))).toString(16);
+      return hex.length === 1 ? '0' + hex : hex;
+    };
+    return '#' + toHex(r) + toHex(g) + toHex(b);
   }
 }
 
