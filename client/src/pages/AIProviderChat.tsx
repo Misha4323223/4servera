@@ -71,6 +71,52 @@ const providers: ProviderInfo[] = [
   }
 ];
 
+// Функция для рендеринга SVG из markdown
+const renderMessageContent = (content: string) => {
+  // Проверяем наличие SVG блоков
+  const svgRegex = /```svg\n([\s\S]*?)\n```/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = svgRegex.exec(content)) !== null) {
+    // Добавляем текст до SVG
+    if (match.index > lastIndex) {
+      parts.push(
+        <div key={`text-${lastIndex}`} className="whitespace-pre-wrap">
+          {content.substring(lastIndex, match.index)}
+        </div>
+      );
+    }
+
+    // Добавляем SVG превью
+    const svgContent = match[1];
+    parts.push(
+      <div key={`svg-${match.index}`} className="my-4 p-4 bg-white rounded-lg shadow-sm border">
+        <div className="text-sm text-gray-600 mb-2">SVG Превью:</div>
+        <div 
+          className="svg-preview"
+          dangerouslySetInnerHTML={{ __html: svgContent }}
+          style={{ maxWidth: '400px', maxHeight: '400px' }}
+        />
+      </div>
+    );
+
+    lastIndex = svgRegex.lastIndex;
+  }
+
+  // Добавляем оставшийся текст
+  if (lastIndex < content.length) {
+    parts.push(
+      <div key={`text-${lastIndex}`} className="whitespace-pre-wrap">
+        {content.substring(lastIndex)}
+      </div>
+    );
+  }
+
+  return parts.length > 0 ? parts : <div className="whitespace-pre-wrap">{content}</div>;
+};
+
 // Компонент сообщения
 const MessageBubble: React.FC<{ message: Message }> = ({ message }) => {
   const isAi = message.sender === 'ai';
@@ -89,7 +135,7 @@ const MessageBubble: React.FC<{ message: Message }> = ({ message }) => {
           ? 'bg-primary-foreground text-primary' 
           : 'bg-primary text-primary-foreground'
       }`}>
-        <div className="whitespace-pre-wrap">{message.content}</div>
+        {renderMessageContent(message.content)}
         
         {isAi && message.provider && (
           <div className="text-xs opacity-75 mt-2">

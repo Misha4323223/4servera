@@ -157,12 +157,30 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
           const result = await response.json();
           
           if (result.success) {
+            // Встраиваем SVG превью прямо в чат
+            let svgPreview = '';
+            if (result.result.svgContent) {
+              // Создаем уменьшенную версию для превью (максимум 400px)
+              const previewSvg = result.result.svgContent
+                .replace(/width="[^"]*"/, 'width="400"')
+                .replace(/height="[^"]*"/, 'height="400"')
+                .replace(/viewBox="[^"]*"/, 'viewBox="0 0 400 400"');
+              
+              svgPreview = `
+
+**Превью результата:**
+\`\`\`svg
+${previewSvg}
+\`\`\`
+
+`;
+            }
+
             const svgResponse = `✅ Векторизация завершена через сервер 5006!
 
 📄 Формат: SVG (5 цветов максимум)  
 🎨 Качество: Упрощенная обработка
-📁 Файл: ${result.result.filename}
-
+📁 Файл: ${result.result.filename}${svgPreview}
 🔗 [Просмотреть изображение](/output/vectorizer/${result.result.filename})
 📥 [Скачать SVG файл](/output/vectorizer/${result.result.filename}?download=true)`;
 
