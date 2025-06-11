@@ -3,7 +3,6 @@
  */
 
 const vectorizer = require('./advanced-vectorizer.cjs');
-const smartRouter = require('./server/smart-router.js');
 const https = require('https');
 const fs = require('fs');
 
