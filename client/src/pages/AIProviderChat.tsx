@@ -89,25 +89,36 @@ const renderMessageContent = (content: string) => {
       );
     }
 
-    // Добавляем SVG превью
+    // Добавляем SVG превью как изображение
     const svgContent = match[1].trim();
     console.log('AIProviderChat SVG Content length:', svgContent.length);
-    console.log('AIProviderChat SVG starts with:', svgContent.substring(0, 100));
     
-    parts.push(
-      <div key={`svg-${match.index}`} className="my-4 p-4 bg-white rounded-lg shadow-sm border">
-        <div className="text-sm text-gray-600 mb-2">SVG Превью:</div>
-        {svgContent.length > 0 ? (
-          <div 
-            className="svg-preview"
-            dangerouslySetInnerHTML={{ __html: svgContent }}
-            style={{ maxWidth: '400px', maxHeight: '400px' }}
+    try {
+      // Кодируем SVG в base64 data URI
+      const svgBase64 = btoa(unescape(encodeURIComponent(svgContent)));
+      const dataUri = `data:image/svg+xml;base64,${svgBase64}`;
+      
+      parts.push(
+        <div key={`svg-${match.index}`} className="my-4 text-center">
+          <div className="text-sm text-gray-600 mb-2 font-medium">🎨 SVG Превью</div>
+          <img 
+            src={dataUri}
+            alt="SVG векторное изображение"
+            className="max-w-full h-auto rounded-lg shadow-sm border"
+            style={{ maxHeight: '400px' }}
+            onLoad={() => console.log('✅ AIProviderChat SVG изображение загружено')}
+            onError={() => console.error('❌ AIProviderChat Ошибка загрузки SVG')}
           />
-        ) : (
-          <div className="text-sm text-red-500">SVG контент пустой</div>
-        )}
-      </div>
-    );
+        </div>
+      );
+    } catch (error) {
+      console.error('❌ AIProviderChat Ошибка создания SVG превью:', error);
+      parts.push(
+        <div key={`svg-${match.index}`} className="my-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="text-sm text-red-600">❌ Ошибка отображения SVG</div>
+        </div>
+      );
+    }
 
     lastIndex = svgRegex.lastIndex;
   }

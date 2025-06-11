@@ -29,25 +29,36 @@ const renderMessageContent = (text: string) => {
       );
     }
 
-    // Add SVG preview
+    // Add SVG preview as image (same as generator images)
     const svgContent = match[1].trim();
     console.log('SVG Content length:', svgContent.length);
-    console.log('SVG starts with:', svgContent.substring(0, 100));
     
-    parts.push(
-      <div key={`svg-${match.index}`} className="my-3 p-3 bg-gray-50 rounded-lg border">
-        <div className="text-xs text-gray-600 mb-2">SVG Preview:</div>
-        {svgContent.length > 0 ? (
-          <div 
-            className="svg-preview"
-            dangerouslySetInnerHTML={{ __html: svgContent }}
-            style={{ maxWidth: '350px', maxHeight: '350px', margin: '0 auto' }}
+    try {
+      // Encode SVG as base64 data URI
+      const svgBase64 = btoa(unescape(encodeURIComponent(svgContent)));
+      const dataUri = `data:image/svg+xml;base64,${svgBase64}`;
+      
+      parts.push(
+        <div key={`svg-${match.index}`} className="my-4 text-center">
+          <div className="text-xs text-gray-600 mb-2 font-medium">🎨 SVG Превью</div>
+          <img 
+            src={dataUri}
+            alt="SVG векторное изображение"
+            className="max-w-full h-auto rounded-lg shadow-lg"
+            style={{ maxHeight: '300px' }}
+            onLoad={() => console.log('✅ SVG изображение загружено')}
+            onError={() => console.error('❌ Ошибка загрузки SVG')}
           />
-        ) : (
-          <div className="text-sm text-red-500">SVG контент пустой</div>
-        )}
-      </div>
-    );
+        </div>
+      );
+    } catch (error) {
+      console.error('❌ Ошибка создания SVG превью:', error);
+      parts.push(
+        <div key={`svg-${match.index}`} className="my-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <div className="text-sm text-red-600">❌ Ошибка отображения SVG</div>
+        </div>
+      );
+    }
 
     lastIndex = svgRegex.lastIndex;
   }

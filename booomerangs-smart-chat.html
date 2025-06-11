@@ -2384,19 +2384,58 @@
         html = html.replace(/```svg\n([\s\S]*?)\n```/g, function(match, svgContent) {
           console.log('🎨 [SVG] Найден SVG блок, длина:', svgContent.length);
           
-          // Создаем компактное превью для SVG
-          const svgPreview = `
-            <div style="margin: 12px 0; padding: 12px; background: #f8f9fa; border-radius: 6px; border: 1px solid #e0e0e0;">
-              <div style="font-size: 11px; color: #666; margin-bottom: 6px; font-weight: 500;">🎨 SVG Превью</div>
-              <div style="background: white; padding: 8px; border-radius: 4px; max-width: 300px; max-height: 200px; overflow: hidden; margin: 0 auto;">
-                <div style="transform: scale(0.8); transform-origin: center; max-width: 100%; max-height: 100%;">
-                  ${svgContent}
+          try {
+            // Очищаем и подготавливаем SVG контент
+            let cleanSvgContent = svgContent.trim();
+            
+            // Убираем лишние символы и фиксируем размеры для превью
+            cleanSvgContent = cleanSvgContent
+              .replace(/width="[^"]*"/g, 'width="300"')
+              .replace(/height="[^"]*"/g, 'height="300"');
+            
+            // Для больших файлов используем оптимизированную версию
+            if (cleanSvgContent.length > 2000000) { // 2MB лимит для критически больших файлов
+              console.log('🎨 [SVG] Файл критически большой, создаем упрощенную версию');
+              
+              // Создаем упрощенную версию SVG только с первыми путями
+              const pathMatches = cleanSvgContent.match(/<path[^>]*>/g);
+              if (pathMatches && pathMatches.length > 20) {
+                // Берем только первые 20 путей для превью
+                const simplifiedPaths = pathMatches.slice(0, 20).join('\n    ');
+                const svgHeader = cleanSvgContent.substring(0, cleanSvgContent.indexOf('<g'));
+                const svgFooter = '</g>\n</svg>';
+                
+                cleanSvgContent = svgHeader + '<g fill="#333" stroke="none">\n    ' + simplifiedPaths + '\n  ' + svgFooter;
+                console.log('🎨 [SVG] Создана упрощенная версия с', 20, 'путями');
+              }
+            }
+            
+            // Используем URL encoding вместо base64 для лучшей совместимости
+            const encodedSvg = encodeURIComponent(cleanSvgContent);
+            const dataUri = `data:image/svg+xml,${encodedSvg}`;
+            
+            // Создаем превью как обычное изображение
+            const svgPreview = `
+              <div style="margin: 15px 0; text-align: center;">
+                <div style="font-size: 11px; color: #666; margin-bottom: 8px; font-weight: 500;">🎨 SVG Превью</div>
+                <div style="max-width: 300px; margin: 0 auto; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                  <img src="${dataUri}" 
+                       alt="SVG векторное изображение" 
+                       style="width: 100%; height: auto; max-height: 300px; display: block;"
+                       onload="console.log('✅ [SVG] Изображение загружено')" 
+                       onerror="console.error('❌ [SVG] Ошибка загрузки'); this.style.display='none'; this.nextElementSibling.style.display='block';">
+                  <div style="display: none; padding: 20px; background: #f0f0f0; color: #666; text-align: center;">
+                    ❌ Ошибка загрузки превью
+                  </div>
                 </div>
-              </div>
-            </div>`;
-          
-          console.log('🎨 [SVG] SVG превью создан');
-          return svgPreview;
+              </div>`;
+            
+            console.log('🎨 [SVG] SVG превью создан как изображение');
+            return svgPreview;
+          } catch (error) {
+            console.error('❌ [SVG] Ошибка создания превью:', error);
+            return `<div style="margin: 12px 0; padding: 8px; background: #ffe6e6; border-radius: 4px; color: #d63031;">❌ Ошибка отображения SVG</div>`;
+          }
         });
         
         // Сначала обрабатываем переносы строк, НО сохраняем маркеры для изображений
