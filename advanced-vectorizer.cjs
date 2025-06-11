@@ -113,8 +113,10 @@ async function analyzeImageType(imageBuffer) {
     const colorMap = new Map();
     let totalPixels = 0;
     
-    // Проверка количества каналов (RGB/RGBA)
-    const channels = Math.min(info.channels, 3); // Используем только RGB
+    // Проверка валидности данных изображения
+    if (!data || data.length === 0 || !info.width || !info.height || info.channels < 3) {
+      throw new Error('Невалидные данные изображения');
+    }
     
     for (let i = 0; i < data.length; i += info.channels) {
       const r = data[i] || 0;
@@ -149,7 +151,6 @@ async function analyzeImageType(imageBuffer) {
     // Sobel edge detection для правильного анализа контрастности
     for (let y = 1; y < grayInfo.height - 1; y++) {
       for (let x = 1; x < grayInfo.width - 1; x++) {
-        const idx = y * grayInfo.width + x;
         
         // Sobel X gradient
         const gx = 
@@ -191,11 +192,11 @@ async function analyzeImageType(imageBuffer) {
       recommendedSettings.cornerThreshold = 75;
     } else if (avgContrast < 20) {
       imageType = 'PHOTO';
-      recommendedSettings.maxColors = 6;
+      recommendedSettings.maxColors = 5; // Ограничение для шелкографии
       recommendedSettings.pathFitting = 3;
     } else if (colorComplexity > 0.5) {
       imageType = 'COMPLEX_PHOTO';
-      recommendedSettings.maxColors = 8;
+      recommendedSettings.maxColors = 5; // Ограничение для шелкографии
       recommendedSettings.pathFitting = 4;
     } else {
       imageType = 'ILLUSTRATION';
@@ -300,6 +301,11 @@ async function resampleImage(imageBuffer, settings, analysis) {
   try {
     const sharp = require('sharp');
     const metadata = await sharp(imageBuffer).metadata();
+    
+    // Валидация размеров изображения
+    if (!metadata.width || !metadata.height || metadata.width < 1 || metadata.height < 1) {
+      throw new Error('Невалидные размеры изображения');
+    }
     
     // Adobe определение целевого размера
     let targetWidth = metadata.width;
