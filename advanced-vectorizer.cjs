@@ -28,7 +28,7 @@ const ADOBE_SILKSCREEN_PRESET = {
     optiCurve: true, // Оптимизация кривых
     
     // Размеры и качество
-    maxSize: 1200, // Оптимальный размер для векторизации
+    maxSize: 2400, // Увеличенный размер для высокого разрешения
     preprocessScale: 0.8 // Предварительное масштабирование
   }
 };
@@ -715,9 +715,9 @@ async function combineColorLayers(colorLayers, originalImageBuffer) {
     console.log(`📊 ЭТАП 4: Границы контента - X: ${minX}-${maxX}, Y: ${minY}-${maxY}`);
     console.log(`📊 ЭТАП 4: Размер контента: ${contentWidth}x${contentHeight}`);
     
-    // Используем стандартные размеры 1200x1200 для совместимости
-    const optimizedWidth = 1200;
-    const optimizedHeight = 1200;
+    // Используем увеличенные размеры 2400x2400 для высокого разрешения
+    const optimizedWidth = 2400;
+    const optimizedHeight = 2400;
     
     // Вычисляем масштаб для вписывания контента в viewBox
     const scaleX = (optimizedWidth - padding * 2) / contentWidth;
@@ -1618,7 +1618,7 @@ async function createRealSVG(imageBuffer, settings) {
     }
     
     // Определяем размеры для векторизации - увеличиваем для шелкографии
-    const maxSize = settings.maxSize || 1200; // Увеличено для лучшей детализации
+    const maxSize = settings.maxSize || 2400; // Увеличено для лучшей детализации
     let targetWidth = originalWidth;
     let targetHeight = originalHeight;
     
