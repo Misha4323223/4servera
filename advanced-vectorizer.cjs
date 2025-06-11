@@ -4244,9 +4244,9 @@ class StreamVectorizer {
     // Использование кубических Безье кривых если доступны
     if (contour.bezierPath && points.length >= 8) {
       for (let i = 2; i < points.length - 6; i += 8) {
-        pathData += ` C ${points[i].toFixed(2)} ${points[i+1].toFixed(2)}, `;
-        pathData += `${points[i+2].toFixed(2)} ${points[i+3].toFixed(2)}, `;
-        pathData += `${points[i+4].toFixed(2)} ${points[i+5].toFixed(2)}`;
+        pathData += ` C ${points[i].toFixed(2)} ${points[i+1].toFixed(2)},`;
+        pathData += `${points[i+2].toFixed(2)} ${points[i+3].toFixed(2)},`;
+        pathData += `${points[i+6].toFixed(2)} ${points[i+7].toFixed(2)}`;
       }
     } else {
       // Простые линии для обычных контуров
