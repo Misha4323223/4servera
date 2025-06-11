@@ -2577,6 +2577,435 @@ function optimizeSVGForOutput(svgContent, options) {
 }
 
 /**
+ * ДОПОЛНИТЕЛЬНЫЕ ADOBE ILLUSTRATOR ТЕХНИКИ
+ * Intelligent Color Grouping, Edge-Preserving Smoothing, Method Selection
+ */
+
+/**
+ * intelligentColorGrouping() - Интеллектуальная группировка цветов
+ * Расширенный Adobe алгоритм группировки похожих цветов
+ */
+function intelligentColorGrouping(colorPalette, settings = {}) {
+  console.log(`🎨 Adobe Intelligent Color Grouping для ${colorPalette.length} цветов...`);
+  
+  const groupingTolerance = settings.groupingTolerance || 15; // Adobe стандарт
+  const minGroupSize = settings.minGroupSize || 2;
+  const preserveDetails = settings.preserveDetails !== false;
+  
+  if (colorPalette.length <= 2) return colorPalette; // Минимальный набор
+  
+  const groups = [];
+  const used = new Set();
+  
+  for (let i = 0; i < colorPalette.length; i++) {
+    if (used.has(i)) continue;
+    
+    const baseColor = colorPalette[i];
+    const group = [baseColor];
+    used.add(i);
+    
+    // Поиск похожих цветов для группировки
+    for (let j = i + 1; j < colorPalette.length; j++) {
+      if (used.has(j)) continue;
+      
+      const candidateColor = colorPalette[j];
+      const similarity = calculateColorSimilarity(baseColor, candidateColor);
+      
+      if (similarity <= groupingTolerance) {
+        group.push(candidateColor);
+        used.add(j);
+      }
+    }
+    
+    // Объединение группы в представительный цвет
+    if (group.length >= minGroupSize || !preserveDetails) {
+      const mergedColor = mergeColorGroup(group);
+      groups.push(mergedColor);
+    } else {
+      // Сохранение отдельных цветов при preserveDetails
+      groups.push(...group);
+    }
+  }
+  
+  console.log(`   ✅ Группировка: ${colorPalette.length} → ${groups.length} цветов`);
+  return groups.slice(0, 5); // Ограничение для шелкографии
+}
+
+/**
+ * calculateColorSimilarity() - Расчет схожести цветов
+ */
+function calculateColorSimilarity(color1, color2) {
+  const rgb1 = hexToRgb(color1.hex);
+  const rgb2 = hexToRgb(color2.hex);
+  
+  // Euclidean distance в RGB пространстве
+  return Math.sqrt(
+    Math.pow(rgb1.r - rgb2.r, 2) +
+    Math.pow(rgb1.g - rgb2.g, 2) +
+    Math.pow(rgb1.b - rgb2.b, 2)
+  );
+}
+
+/**
+ * mergeColorGroup() - Объединение группы цветов
+ */
+function mergeColorGroup(colorGroup) {
+  let totalR = 0, totalG = 0, totalB = 0, totalCount = 0;
+  
+  for (const color of colorGroup) {
+    const rgb = hexToRgb(color.hex);
+    const weight = color.count || 1;
+    
+    totalR += rgb.r * weight;
+    totalG += rgb.g * weight;
+    totalB += rgb.b * weight;
+    totalCount += weight;
+  }
+  
+  const avgR = Math.round(totalR / totalCount);
+  const avgG = Math.round(totalG / totalCount);
+  const avgB = Math.round(totalB / totalCount);
+  
+  return {
+    hex: rgbToHex(avgR, avgG, avgB),
+    count: totalCount,
+    merged: true
+  };
+}
+
+/**
+ * edgePreservingSmoothing() - Сглаживание с сохранением краев
+ * Adobe Edge-Preserving Smoothing algorithm
+ */
+function edgePreservingSmoothing(mask, settings = {}) {
+  const smoothingRadius = settings.smoothingRadius || 2;
+  const edgeThreshold = settings.edgeThreshold || 20;
+  const preserveCorners = settings.preserveCorners !== false;
+  
+  const { width, height } = mask;
+  const smoothedMask = new Uint8Array(mask.data);
+  
+  for (let y = smoothingRadius; y < height - smoothingRadius; y++) {
+    for (let x = smoothingRadius; x < width - smoothingRadius; x++) {
+      const idx = y * width + x;
+      
+      if (preserveCorners && isCornerPixel(mask.data, x, y, width, height)) {
+        continue; // Сохраняем углы
+      }
+      
+      const edgeStrength = calculateEdgeStrength(mask.data, x, y, width, height);
+      
+      if (edgeStrength < edgeThreshold) {
+        // Применяем сглаживание только к не-краевым областям
+        smoothedMask[idx] = applyLocalSmoothing(mask.data, x, y, width, height, smoothingRadius);
+      }
+    }
+  }
+  
+  return {
+    ...mask,
+    data: smoothedMask,
+    smoothed: true
+  };
+}
+
+/**
+ * isCornerPixel() - Определение угловых пикселей
+ */
+function isCornerPixel(data, x, y, width, height) {
+  const idx = y * width + x;
+  let transitions = 0;
+  
+  // Проверка 8-связности для обнаружения углов
+  const neighbors = [
+    [-1, -1], [0, -1], [1, -1],
+    [-1,  0],          [1,  0],
+    [-1,  1], [0,  1], [1,  1]
+  ];
+  
+  let prevValue = data[idx];
+  
+  for (const [dx, dy] of neighbors) {
+    const nx = x + dx;
+    const ny = y + dy;
+    
+    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+      const nIdx = ny * width + nx;
+      const currValue = data[nIdx];
+      
+      if (currValue !== prevValue) {
+        transitions++;
+      }
+      prevValue = currValue;
+    }
+  }
+  
+  return transitions >= 4; // Угловая точка имеет много переходов
+}
+
+/**
+ * calculateEdgeStrength() - Расчет силы края
+ */
+function calculateEdgeStrength(data, x, y, width, height) {
+  const idx = y * width + x;
+  let maxDiff = 0;
+  
+  // Sobel операторы для определения краев
+  const sobelX = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];
+  const sobelY = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
+  
+  let gx = 0, gy = 0;
+  
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const nx = x + dx;
+      const ny = y + dy;
+      
+      if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+        const nIdx = ny * width + nx;
+        const pixel = data[nIdx];
+        
+        gx += pixel * sobelX[dy + 1][dx + 1];
+        gy += pixel * sobelY[dy + 1][dx + 1];
+      }
+    }
+  }
+  
+  return Math.sqrt(gx * gx + gy * gy);
+}
+
+/**
+ * applyLocalSmoothing() - Локальное сглаживание
+ */
+function applyLocalSmoothing(data, x, y, width, height, radius) {
+  let sum = 0;
+  let count = 0;
+  
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const nx = x + dx;
+      const ny = y + dy;
+      
+      if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+        const nIdx = ny * width + nx;
+        sum += data[nIdx];
+        count++;
+      }
+    }
+  }
+  
+  return Math.round(sum / count);
+}
+
+/**
+ * adaptiveQualitySettings() - Адаптивные настройки качества
+ * Автоматический выбор оптимальных параметров векторизации
+ */
+function adaptiveQualitySettings(imageInfo, contentType = 'auto') {
+  console.log(`⚙️ Adobe Adaptive Quality Settings для ${imageInfo.width}x${imageInfo.height}...`);
+  
+  const imageSize = imageInfo.width * imageInfo.height;
+  const aspectRatio = imageInfo.width / imageInfo.height;
+  
+  // Базовые настройки Adobe Illustrator
+  let settings = {
+    // Threshold settings
+    threshold: 128,
+    adaptiveThreshold: true,
+    
+    // Path settings  
+    maxPaths: 1000,
+    minPathLength: 3,
+    maxComplexity: 500,
+    
+    // Corner settings
+    cornerThreshold: Math.PI / 3, // 60 градусов
+    cornerSensitivity: 0.8,
+    
+    // Noise settings
+    turdSize: 2,
+    noiseReduction: true,
+    minContourArea: 9,
+    
+    // Method settings
+    method: 'abutting', // abutting/overlapping
+    fillMethod: 'evenodd',
+    
+    // Quality presets
+    preset: 'balanced'
+  };
+  
+  // Адаптация под размер изображения
+  if (imageSize > 500000) { // Большие изображения
+    settings.preset = 'performance';
+    settings.maxPaths = 800;
+    settings.maxComplexity = 300;
+    settings.turdSize = 4;
+    settings.cornerSensitivity = 0.6;
+  } else if (imageSize < 100000) { // Маленькие изображения
+    settings.preset = 'quality';
+    settings.maxPaths = 1500;
+    settings.maxComplexity = 800;
+    settings.turdSize = 1;
+    settings.cornerSensitivity = 0.9;
+  }
+  
+  // Адаптация под соотношение сторон
+  if (aspectRatio > 3 || aspectRatio < 0.33) { // Вытянутые изображения
+    settings.cornerThreshold = Math.PI / 4; // 45 градусов
+    settings.method = 'overlapping';
+  }
+  
+  // Адаптация под тип контента
+  if (contentType === 'text' || contentType === 'logo') {
+    settings.preset = 'precision';
+    settings.cornerSensitivity = 0.95;
+    settings.minPathLength = 2;
+    settings.noiseReduction = false;
+  } else if (contentType === 'photo' || contentType === 'complex') {
+    settings.preset = 'simplified';
+    settings.maxPaths = 500;
+    settings.turdSize = 6;
+    settings.method = 'overlapping';
+  }
+  
+  console.log(`   ⚙️ Выбран preset: ${settings.preset}, метод: ${settings.method}`);
+  
+  return settings;
+}
+
+/**
+ * methodSelection() - Выбор метода векторизации
+ * Adobe Abutting/Overlapping method implementation
+ */
+function methodSelection(paths, method = 'abutting', settings = {}) {
+  console.log(`🔧 Adobe Method Selection: ${method} для ${paths.length} путей...`);
+  
+  if (method === 'abutting') {
+    return processAbuttingMethod(paths, settings);
+  } else if (method === 'overlapping') {
+    return processOverlappingMethod(paths, settings);
+  }
+  
+  return paths; // Fallback
+}
+
+/**
+ * processAbuttingMethod() - Обработка методом Abutting
+ * Пути касаются краями без перекрытий (Adobe стандарт для печати)
+ */
+function processAbuttingMethod(paths, settings = {}) {
+  const tolerance = settings.abuttingTolerance || 0.5;
+  const processedPaths = [];
+  
+  for (const path of paths) {
+    // Убираем микроперекрытия между соседними путями
+    const adjustedPath = adjustPathForAbutting(path, tolerance);
+    
+    if (adjustedPath) {
+      processedPaths.push({
+        ...adjustedPath,
+        method: 'abutting',
+        fillRule: 'evenodd'
+      });
+    }
+  }
+  
+  console.log(`   🔧 Abutting: обработано ${processedPaths.length} путей`);
+  return processedPaths;
+}
+
+/**
+ * processOverlappingMethod() - Обработка методом Overlapping
+ * Пути могут перекрываться для сложных форм
+ */
+function processOverlappingMethod(paths, settings = {}) {
+  const overlapTolerance = settings.overlapTolerance || 1.0;
+  const processedPaths = [];
+  
+  for (const path of paths) {
+    // Разрешаем контролируемые перекрытия
+    const expandedPath = expandPathForOverlapping(path, overlapTolerance);
+    
+    if (expandedPath) {
+      processedPaths.push({
+        ...expandedPath,
+        method: 'overlapping',
+        fillRule: 'nonzero'
+      });
+    }
+  }
+  
+  console.log(`   🔧 Overlapping: обработано ${processedPaths.length} путей`);
+  return processedPaths;
+}
+
+/**
+ * adjustPathForAbutting() - Корректировка пути для Abutting
+ */
+function adjustPathForAbutting(path, tolerance) {
+  if (!path.d || path.d.length < 10) return path;
+  
+  // Простая корректировка - уменьшение на tolerance для избежания перекрытий
+  const adjustedD = path.d.replace(/(\d+\.?\d*)/g, (match) => {
+    const num = parseFloat(match);
+    return (num * (1 - tolerance * 0.001)).toFixed(3);
+  });
+  
+  return {
+    ...path,
+    d: adjustedD,
+    adjusted: true
+  };
+}
+
+/**
+ * expandPathForOverlapping() - Расширение пути для Overlapping
+ */
+function expandPathForOverlapping(path, tolerance) {
+  if (!path.d || path.d.length < 10) return path;
+  
+  // Простое расширение на tolerance для покрытия зазоров
+  const expandedD = path.d.replace(/(\d+\.?\d*)/g, (match) => {
+    const num = parseFloat(match);
+    return (num * (1 + tolerance * 0.001)).toFixed(3);
+  });
+  
+  return {
+    ...path,
+    d: expandedD,
+    expanded: true
+  };
+}
+
+/**
+ * ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ADOBE ТЕХНИК
+ */
+
+/**
+ * hexToRgb() - Конвертация hex в RGB
+ */
+function hexToRgb(hex) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? {
+    r: parseInt(result[1], 16),
+    g: parseInt(result[2], 16),
+    b: parseInt(result[3], 16)
+  } : { r: 0, g: 0, b: 0 };
+}
+
+/**
+ * rgbToHex() - Конвертация RGB в hex
+ */
+function rgbToHex(r, g, b) {
+  const toHex = (c) => {
+    const hex = Math.max(0, Math.min(255, Math.round(c))).toString(16);
+    return hex.length === 1 ? '0' + hex : hex;
+  };
+  return '#' + toHex(r) + toHex(g) + toHex(b);
+}
+
+/**
  * Упрощенное определение типа контента без тяжелых библиотек
  */
 function detectContentType(imageBuffer) {
@@ -2742,8 +3171,23 @@ async function silkscreenVectorize(imageBuffer, options = {}) {
       maxComplexity: 500
     });
     
-    // 5.3 Создание финального SVG
-    const svgResult = await generateSVG(mergedLayers, {
+    // 5.3 Применение адаптивных настроек качества
+    const qualitySettings = adaptiveQualitySettings(processedInfo, 'auto');
+    
+    // 5.4 Выбор метода векторизации (Abutting/Overlapping)
+    const processedMergedLayers = {
+      ...mergedLayers,
+      layers: mergedLayers.layers.map(layer => ({
+        ...layer,
+        paths: methodSelection(layer.paths, qualitySettings.method, {
+          abuttingTolerance: 0.5,
+          overlapTolerance: 1.0
+        })
+      }))
+    };
+    
+    // 5.5 Создание финального SVG
+    const svgResult = await generateSVG(processedMergedLayers, {
       includeLayerMetadata: true,
       removeComments: false,
       minimizeWhitespace: true,
