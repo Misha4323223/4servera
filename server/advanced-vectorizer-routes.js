@@ -161,11 +161,18 @@ router.post('/convert', upload.single('image'), async (req, res) => {
       options
     });
 
-    const result = await advancedVectorizer.vectorizeImage(
+    // Используем исправленный Adobe алгоритм цветовой сегментации
+    console.log('🎨 Применяем исправленный Adobe Illustrator алгоритм');
+    const result = await advancedVectorizer.silkscreenVectorize(
       req.file.buffer,
-      req.file.originalname,
-      options
+      { maxColors: 6, ...options }
     );
+    
+    // Адаптируем результат под ожидаемый формат API
+    if (result.success) {
+      result.detectedType = 'silkscreen';
+      result.filename = `vectorized_${Date.now().toString(36)}.svg`;
+    }
 
     if (result.success) {
       res.json({
