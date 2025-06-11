@@ -516,11 +516,11 @@ async function createColorMask(imageBuffer, targetColor, settings) {
     
     const maskData = Buffer.alloc(info.width * info.height);
     
-    // Улучшенный адаптивный допуск с учетом насыщенности цвета
-    const baseTolerance = 45;
+    // Строгие допуски для предотвращения поглощения одним цветом
+    const baseTolerance = 25; // Уменьшено для более четкого разделения
     const colorIntensity = Math.max(targetColor.r, targetColor.g, targetColor.b) - Math.min(targetColor.r, targetColor.g, targetColor.b);
-    const intensityBonus = colorIntensity > 100 ? 15 : 5; // Больше допуска для насыщенных цветов
-    const adaptiveTolerance = Math.min(85, baseTolerance + (parseFloat(targetColor.percentage) * 1.5) + intensityBonus);
+    const intensityBonus = colorIntensity > 100 ? 8 : 3; // Меньше бонуса
+    const adaptiveTolerance = Math.min(45, baseTolerance + intensityBonus); // Жесткий лимит
     
     console.log(`🎯 Используется адаптивный допуск: ${adaptiveTolerance}`);
     
