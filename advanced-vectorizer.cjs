@@ -2720,6 +2720,7 @@ module.exports = {
   createSilkscreenSVG,
   extractDominantColors,
   createColorMask,
+  createAdobeColorMask,
   vectorizeColorLayer,
   combineColorLayers,
   createMonochromeBackup,
