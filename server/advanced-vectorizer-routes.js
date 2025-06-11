@@ -241,7 +241,6 @@ router.post('/convert-url', async (req, res) => {
 
     // Загружаем изображение по URL
     console.log('📥 Загрузка изображения по URL...');
-    const fetch = require('node-fetch');
     const response = await fetch(imageUrl);
     const imageBuffer = await response.buffer();
     
