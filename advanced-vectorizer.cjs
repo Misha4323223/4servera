@@ -675,13 +675,62 @@ async function combineColorLayers(colorLayers, originalImageBuffer) {
     const MAX_SVG_SIZE_KB = 200; // Уменьшено до 200KB для быстрой загрузки
     const MAX_PATH_COMPLEXITY = 500; // Максимальная длина path элемента
     
-    // Добавляем каждый цветной слой с ограничениями
+    // Анализируем координаты для нормализации позиционирования
+    console.log(`📐 ЭТАП 4: Анализируем координаты для центрирования...`);
+    let allCoordinates = [];
+    
+    colorLayers.forEach(layer => {
+      layer.paths.forEach(path => {
+        const coords = path.match(/M (\d+\.?\d*) (\d+\.?\d*)/g);
+        if (coords) {
+          coords.forEach(coord => {
+            const match = coord.match(/M (\d+\.?\d*) (\d+\.?\d*)/);
+            if (match) {
+              allCoordinates.push({
+                x: parseFloat(match[1]),
+                y: parseFloat(match[2])
+              });
+            }
+          });
+        }
+      });
+    });
+    
+    // Находим границы контента
+    const minX = Math.min(...allCoordinates.map(c => c.x));
+    const maxX = Math.max(...allCoordinates.map(c => c.x));
+    const minY = Math.min(...allCoordinates.map(c => c.y));
+    const maxY = Math.max(...allCoordinates.map(c => c.y));
+    
+    const contentWidth = maxX - minX;
+    const contentHeight = maxY - minY;
+    const padding = 20;
+    
+    console.log(`📊 ЭТАП 4: Границы контента - X: ${minX}-${maxX}, Y: ${minY}-${maxY}`);
+    console.log(`📊 ЭТАП 4: Размер контента: ${contentWidth}x${contentHeight}`);
+    console.log(`📊 ЭТАП 4: Смещение: X=${-minX}, Y=${-minY}`);
+    
+    // Обновляем размеры SVG для оптимального отображения
+    const optimizedWidth = contentWidth + padding * 2;
+    const optimizedHeight = contentHeight + padding * 2;
+    
+    // Пересоздаем заголовок SVG с оптимизированными размерами
+    svgContent = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${optimizedWidth}" height="${optimizedHeight}" viewBox="0 0 ${optimizedWidth} ${optimizedHeight}" xmlns="http://www.w3.org/2000/svg">
+  <title>Adobe Limited Color (${colorLayers.length} colors)</title>
+  <desc>Generated with Adobe Illustrator Image Trace compatible algorithm</desc>
+  <style>
+    .vector-layer { shape-rendering: optimizeSpeed; }
+  </style>
+`;
+
+    // Добавляем каждый цветной слой с нормализацией координат
     colorLayers.forEach((layer, index) => {
       const layerNumber = index + 1;
       console.log(`🎨 ЭТАП 4.${layerNumber}: Добавляем слой для цвета ${layer.color}`);
       console.log(`   - Путей в слое: ${layer.paths.length}`);
       
-      svgContent += `  <g id="color-${layerNumber}" class="vector-layer" fill="${layer.color}" stroke="none">\n`;
+      svgContent += `  <g id="color-${layerNumber}" class="vector-layer" fill="${layer.color}" stroke="none" transform="translate(${padding - minX}, ${padding - minY})">\n`;
       
       let validPaths = 0;
       let layerPaths = 0;
@@ -721,6 +770,8 @@ async function combineColorLayers(colorLayers, originalImageBuffer) {
     console.log(`   - Всего слоев: ${colorLayers.length}`);
     console.log(`   - Всего путей: ${totalPaths}`);
     console.log(`   - Размер контента: ${(svgContent.length / 1024).toFixed(1)} КБ`);
+    console.log(`   - Оптимизированные размеры: ${optimizedWidth}x${optimizedHeight}`);
+    console.log(`   - Смещение устранено: контент центрирован`);
     
     if (totalPaths === 0) {
       console.log('❌ ЭТАП 4: Нет валидных путей, создаем резервный SVG');
