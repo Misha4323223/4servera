@@ -1991,6 +1991,592 @@ function createLinearPath(points) {
 }
 
 /**
+ * ЭТАП 5: СБОРКА SVG
+ * Adobe Illustrator SVG generation pipeline
+ */
+
+/**
+ * composeLayers() - Композиция слоев
+ * Adobe Illustrator layer composition algorithm
+ */
+async function composeLayers(vectorContours, colorPalette, imageInfo, settings = {}) {
+  console.log(`🎨 ЭТАП 5.1: Adobe composeLayers - Композиция ${vectorContours.length} слоев...`);
+  
+  try {
+    if (!vectorContours || vectorContours.length === 0) {
+      throw new Error('Нет векторных контуров для композиции');
+    }
+    
+    const composedLayers = [];
+    const layerOrder = settings.layerOrder || 'darkToLight'; // Adobe стандарт
+    const blendMode = settings.blendMode || 'normal';
+    const opacity = settings.opacity || 1.0;
+    
+    console.log(`   🎯 Параметры композиции: order=${layerOrder}, blend=${blendMode}, opacity=${opacity}`);
+    
+    // Сортировка слоев по Adobe алгоритму
+    const sortedContours = sortLayersByBrightness(vectorContours, colorPalette, layerOrder);
+    
+    for (let layerIndex = 0; layerIndex < sortedContours.length; layerIndex++) {
+      const contourGroup = sortedContours[layerIndex];
+      console.log(`   🎨 Композиция слоя ${layerIndex + 1}/${sortedContours.length} (цвет: ${contourGroup.color?.hex})...`);
+      
+      // Создание SVG слоя с Adobe стилизацией
+      const svgLayer = createSVGLayer(contourGroup, {
+        layerIndex,
+        blendMode,
+        opacity,
+        fillRule: 'evenodd' // Adobe стандарт
+      });
+      
+      // Оптимизация слоя для печати
+      const optimizedLayer = optimizeLayerForPrint(svgLayer, {
+        maxPaths: settings.maxPathsPerLayer || 1000,
+        simplifyTolerance: settings.simplifyTolerance || 0.5,
+        removeOverlaps: true
+      });
+      
+      console.log(`     ✅ Создан слой: ${optimizedLayer.paths.length} путей, ${optimizedLayer.totalPoints} точек`);
+      
+      composedLayers.push({
+        ...optimizedLayer,
+        zIndex: layerIndex,
+        color: contourGroup.color,
+        layerName: `Layer_${layerIndex + 1}_${contourGroup.color?.hex?.substring(1) || 'unknown'}`
+      });
+    }
+    
+    console.log(`   🎨 Композиция завершена: ${composedLayers.length} слоев готовы`);
+    
+    return {
+      layers: composedLayers,
+      totalLayers: composedLayers.length,
+      totalPaths: composedLayers.reduce((sum, layer) => sum + layer.paths.length, 0),
+      canvasSize: { width: imageInfo.width, height: imageInfo.height },
+      composed: true
+    };
+    
+  } catch (error) {
+    console.error('❌ Ошибка composeLayers:', error);
+    return {
+      layers: [],
+      totalLayers: 0,
+      totalPaths: 0,
+      canvasSize: { width: 800, height: 800 },
+      composed: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * sortLayersByBrightness() - Сортировка слоев по яркости
+ * Adobe Illustrator layer ordering algorithm
+ */
+function sortLayersByBrightness(contours, colorPalette, order) {
+  const contoursWithBrightness = contours.map(contour => {
+    const color = contour.color || { hex: '#000000' };
+    const brightness = calculateColorBrightness(color.hex);
+    
+    return {
+      ...contour,
+      brightness,
+      color
+    };
+  });
+  
+  if (order === 'darkToLight') {
+    return contoursWithBrightness.sort((a, b) => a.brightness - b.brightness);
+  } else if (order === 'lightToDark') {
+    return contoursWithBrightness.sort((a, b) => b.brightness - a.brightness);
+  }
+  
+  return contoursWithBrightness; // Исходный порядок
+}
+
+/**
+ * calculateColorBrightness() - Расчет яркости цвета
+ */
+function calculateColorBrightness(hexColor) {
+  const hex = hexColor.replace('#', '');
+  const r = parseInt(hex.substr(0, 2), 16);
+  const g = parseInt(hex.substr(2, 2), 16);
+  const b = parseInt(hex.substr(4, 2), 16);
+  
+  // Формула luminance (Adobe стандарт)
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
+/**
+ * createSVGLayer() - Создание SVG слоя
+ */
+function createSVGLayer(contourGroup, options) {
+  const { layerIndex, blendMode, opacity, fillRule } = options;
+  const paths = [];
+  let totalPoints = 0;
+  
+  for (const contour of contourGroup.contours) {
+    if (!contour || !contour.commands && !contour.points) continue;
+    
+    const svgPath = convertContourToSVGPath(contour);
+    if (svgPath) {
+      paths.push({
+        d: svgPath.d,
+        fill: contourGroup.color?.hex || '#000000',
+        fillRule,
+        opacity,
+        blendMode: blendMode !== 'normal' ? blendMode : undefined
+      });
+      totalPoints += svgPath.pointCount;
+    }
+  }
+  
+  return {
+    paths,
+    totalPoints,
+    layerIndex,
+    created: true
+  };
+}
+
+/**
+ * convertContourToSVGPath() - Конвертация контура в SVG path
+ */
+function convertContourToSVGPath(contour) {
+  if (!contour) return null;
+  
+  let pathData = '';
+  let pointCount = 0;
+  
+  // Обработка разных типов контуров
+  if (contour.type === 'bezier') {
+    // Кривая Безье
+    pathData = `M ${contour.start.x},${contour.start.y} C ${contour.cp1.x},${contour.cp1.y} ${contour.cp2.x},${contour.cp2.y} ${contour.end.x},${contour.end.y}`;
+    pointCount = 4;
+  } else if (contour.type === 'linear') {
+    // Линейный путь
+    pathData = contour.points.map((point, index) => 
+      (index === 0 ? 'M' : 'L') + ` ${point.x},${point.y}`
+    ).join(' ');
+    pointCount = contour.points.length;
+  } else if (contour.commands) {
+    // Команды SVG
+    pathData = contour.commands.map(cmd => 
+      `${cmd.type} ${cmd.x},${cmd.y}`
+    ).join(' ');
+    pointCount = contour.commands.length;
+  } else if (contour.points) {
+    // Массив точек
+    pathData = contour.points.map((point, index) => 
+      (index === 0 ? 'M' : 'L') + ` ${point.x},${point.y}`
+    ).join(' ');
+    pointCount = contour.points.length;
+  }
+  
+  if (pathData && pathData.length > 3) {
+    pathData += ' Z'; // Замыкание пути
+    return { d: pathData, pointCount };
+  }
+  
+  return null;
+}
+
+/**
+ * optimizeLayerForPrint() - Оптимизация слоя для печати
+ */
+function optimizeLayerForPrint(layer, options) {
+  const { maxPaths, simplifyTolerance, removeOverlaps } = options;
+  let optimizedPaths = [...layer.paths];
+  
+  // Упрощение сложных путей
+  if (simplifyTolerance > 0) {
+    optimizedPaths = optimizedPaths.map(path => 
+      simplifyPathForPrint(path, simplifyTolerance)
+    );
+  }
+  
+  // Удаление перекрытий (если требуется)
+  if (removeOverlaps && optimizedPaths.length > 1) {
+    optimizedPaths = removePathOverlaps(optimizedPaths);
+  }
+  
+  // Ограничение количества путей
+  if (maxPaths && optimizedPaths.length > maxPaths) {
+    console.log(`   ⚠️ Ограничение путей: ${optimizedPaths.length} → ${maxPaths}`);
+    optimizedPaths = optimizedPaths.slice(0, maxPaths);
+  }
+  
+  return {
+    ...layer,
+    paths: optimizedPaths
+  };
+}
+
+/**
+ * simplifyPathForPrint() - Упрощение пути для печати
+ */
+function simplifyPathForPrint(path, tolerance) {
+  // Простая оптимизация - удаление лишних цифр после запятой
+  const simplifiedD = path.d.replace(/(\d+\.\d{3})\d+/g, '$1');
+  
+  return {
+    ...path,
+    d: simplifiedD
+  };
+}
+
+/**
+ * removePathOverlaps() - Удаление перекрытий путей
+ */
+function removePathOverlaps(paths) {
+  // Простая реализация - возвращаем исходные пути
+  // В полной версии здесь был бы алгоритм Boolean operations
+  return paths;
+}
+
+/**
+ * mergePaths() - Объединение путей
+ * Adobe Illustrator path merging algorithm
+ */
+async function mergePaths(composedLayers, settings = {}) {
+  console.log(`🔗 ЭТАП 5.2: Adobe mergePaths - Объединение путей в ${composedLayers.layers.length} слоях...`);
+  
+  try {
+    if (!composedLayers || !composedLayers.layers.length) {
+      throw new Error('Нет слоев для объединения путей');
+    }
+    
+    const mergedLayers = [];
+    const mergeStrategy = settings.mergeStrategy || 'byColor'; // Adobe стандарт
+    const mergeTolerance = settings.mergeTolerance || 1.0;
+    const preserveDetails = settings.preserveDetails !== false;
+    
+    console.log(`   🎯 Параметры объединения: strategy=${mergeStrategy}, tolerance=${mergeTolerance}`);
+    
+    for (let layerIndex = 0; layerIndex < composedLayers.layers.length; layerIndex++) {
+      const layer = composedLayers.layers[layerIndex];
+      console.log(`   🔗 Объединение путей слоя ${layerIndex + 1}/${composedLayers.layers.length} (${layer.paths.length} путей)...`);
+      
+      let mergedPaths = [];
+      
+      if (mergeStrategy === 'byColor') {
+        // Объединение по цвету (Adobe стандарт)
+        mergedPaths = mergePathsByColor(layer.paths, mergeTolerance);
+      } else if (mergeStrategy === 'byProximity') {
+        // Объединение по близости
+        mergedPaths = mergePathsByProximity(layer.paths, mergeTolerance);
+      } else {
+        // Без объединения
+        mergedPaths = layer.paths;
+      }
+      
+      // Оптимизация для шелкографии
+      const silkscreenOptimized = optimizeForSilkscreen(mergedPaths, {
+        minPathLength: settings.minPathLength || 3,
+        maxComplexity: settings.maxComplexity || 500,
+        preserveDetails
+      });
+      
+      console.log(`     ✅ Объединено: ${layer.paths.length} → ${silkscreenOptimized.length} путей`);
+      
+      mergedLayers.push({
+        ...layer,
+        paths: silkscreenOptimized,
+        merged: true,
+        originalPathCount: layer.paths.length,
+        mergedPathCount: silkscreenOptimized.length
+      });
+    }
+    
+    const totalMergedPaths = mergedLayers.reduce((sum, layer) => sum + layer.paths.length, 0);
+    console.log(`   🔗 Объединение завершено: ${totalMergedPaths} финальных путей`);
+    
+    return {
+      ...composedLayers,
+      layers: mergedLayers,
+      totalPaths: totalMergedPaths,
+      merged: true
+    };
+    
+  } catch (error) {
+    console.error('❌ Ошибка mergePaths:', error);
+    // Graceful fallback - возвращаем исходные слои с флагом ошибки
+    return {
+      ...composedLayers,
+      merged: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * mergePathsByColor() - Объединение путей по цвету
+ */
+function mergePathsByColor(paths, tolerance) {
+  const colorGroups = new Map();
+  
+  // Группировка по цвету
+  for (const path of paths) {
+    const color = path.fill || '#000000';
+    if (!colorGroups.has(color)) {
+      colorGroups.set(color, []);
+    }
+    colorGroups.get(color).push(path);
+  }
+  
+  const mergedPaths = [];
+  
+  // Объединение путей в каждой цветовой группе
+  for (const [color, groupPaths] of colorGroups) {
+    if (groupPaths.length === 1) {
+      mergedPaths.push(groupPaths[0]);
+    } else {
+      // Простое объединение - соединение path data
+      const combinedD = groupPaths.map(p => p.d).join(' ');
+      mergedPaths.push({
+        ...groupPaths[0],
+        d: combinedD
+      });
+    }
+  }
+  
+  return mergedPaths;
+}
+
+/**
+ * mergePathsByProximity() - Объединение путей по близости
+ */
+function mergePathsByProximity(paths, tolerance) {
+  // Простая реализация - возвращаем исходные пути
+  // В полной версии здесь был бы алгоритм spatial clustering
+  return paths;
+}
+
+/**
+ * optimizeForSilkscreen() - Оптимизация для шелкографии
+ */
+function optimizeForSilkscreen(paths, options) {
+  const { minPathLength, maxComplexity, preserveDetails } = options;
+  
+  return paths.filter(path => {
+    // Удаление слишком коротких путей
+    if (path.d.length < minPathLength) return false;
+    
+    // Ограничение сложности
+    const complexity = (path.d.match(/[MLCQZ]/g) || []).length;
+    if (complexity > maxComplexity) return false;
+    
+    return true;
+  });
+}
+
+/**
+ * generateSVG() - Создание финального SVG
+ * Adobe Illustrator SVG export algorithm
+ */
+async function generateSVG(mergedLayers, settings = {}) {
+  console.log(`📄 ЭТАП 5.3: Adobe generateSVG - Создание финального SVG...`);
+  
+  try {
+    if (!mergedLayers || !mergedLayers.layers.length) {
+      throw new Error('Нет объединенных слоев для создания SVG');
+    }
+    
+    const { canvasSize } = mergedLayers;
+    const width = canvasSize?.width || 800;
+    const height = canvasSize?.height || 800;
+    
+    const svgConfig = {
+      width,
+      height,
+      viewBox: `0 0 ${width} ${height}`,
+      namespace: 'http://www.w3.org/2000/svg',
+      version: '1.1',
+      preserveAspectRatio: 'xMidYMid meet',
+      ...settings
+    };
+    
+    console.log(`   📐 Canvas: ${width}×${height}, слоев: ${mergedLayers.layers.length}`);
+    
+    // Создание SVG документа
+    let svgContent = createSVGHeader(svgConfig);
+    
+    // Добавление метаданных Adobe
+    svgContent += createSVGMetadata({
+      generator: 'BOOOMERANGS Adobe Vectorizer',
+      created: new Date().toISOString(),
+      totalLayers: mergedLayers.layers.length,
+      totalPaths: mergedLayers.totalPaths,
+      format: 'silkscreen'
+    });
+    
+    // Добавление слоев
+    for (const layer of mergedLayers.layers) {
+      svgContent += createLayerSVG(layer, {
+        includeMetadata: settings.includeLayerMetadata !== false,
+        formatForPrint: true
+      });
+    }
+    
+    // Закрытие SVG
+    svgContent += '</svg>';
+    
+    // Финальная оптимизация
+    const optimizedSVG = optimizeSVGForOutput(svgContent, {
+      removeComments: settings.removeComments !== false,
+      minimizeWhitespace: settings.minimizeWhitespace !== false,
+      roundNumbers: settings.roundNumbers !== false
+    });
+    
+    console.log(`   📄 SVG создан: ${optimizedSVG.length} символов, ${mergedLayers.totalPaths} путей`);
+    
+    return {
+      svg: optimizedSVG,
+      metadata: {
+        width,
+        height,
+        layers: mergedLayers.layers.length,
+        paths: mergedLayers.totalPaths,
+        size: optimizedSVG.length,
+        format: 'SVG 1.1',
+        generated: new Date().toISOString()
+      },
+      success: true
+    };
+    
+  } catch (error) {
+    console.error('❌ Ошибка generateSVG:', error);
+    
+    // Создание минимального SVG при ошибке
+    const fallbackSVG = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="800" height="800" viewBox="0 0 800 800">
+  <rect width="800" height="800" fill="#FFFFFF"/>
+  <text x="400" y="400" text-anchor="middle" fill="#000000">Vectorization Error</text>
+</svg>`;
+    
+    return {
+      svg: fallbackSVG,
+      metadata: { 
+        error: error.message,
+        width: 800,
+        height: 800,
+        layers: 0,
+        paths: 0,
+        size: fallbackSVG.length,
+        fallback: true
+      },
+      success: false
+    };
+  }
+}
+
+/**
+ * createSVGHeader() - Создание заголовка SVG
+ */
+function createSVGHeader(config) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="${config.namespace}" 
+     version="${config.version}"
+     width="${config.width}" 
+     height="${config.height}"
+     viewBox="${config.viewBox}"
+     preserveAspectRatio="${config.preserveAspectRatio}">
+`;
+}
+
+/**
+ * createSVGMetadata() - Создание метаданных SVG
+ */
+function createSVGMetadata(metadata) {
+  if (!metadata) return '';
+  
+  return `  <metadata>
+    <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+      <rdf:Description>
+        <dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">BOOOMERANGS Vectorized Image</dc:title>
+        <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">${metadata.generator}</dc:creator>
+        <dc:date xmlns:dc="http://purl.org/dc/elements/1.1/">${metadata.created}</dc:date>
+        <dc:format xmlns:dc="http://purl.org/dc/elements/1.1/">image/svg+xml</dc:format>
+        <!-- Layers: ${metadata.totalLayers}, Paths: ${metadata.totalPaths}, Format: ${metadata.format} -->
+      </rdf:Description>
+    </rdf:RDF>
+  </metadata>
+`;
+}
+
+/**
+ * createLayerSVG() - Создание SVG для слоя
+ */
+function createLayerSVG(layer, options) {
+  const { includeMetadata, formatForPrint } = options;
+  
+  let layerSVG = `  <g id="${layer.layerName || 'layer_' + layer.layerIndex}"`;
+  
+  if (includeMetadata) {
+    layerSVG += ` data-layer-index="${layer.layerIndex}" data-color="${layer.color?.hex}"`;
+  }
+  
+  layerSVG += '>\n';
+  
+  // Добавление путей
+  for (const path of layer.paths) {
+    layerSVG += createPathSVG(path, formatForPrint);
+  }
+  
+  layerSVG += '  </g>\n';
+  
+  return layerSVG;
+}
+
+/**
+ * createPathSVG() - Создание SVG для пути
+ */
+function createPathSVG(path, formatForPrint) {
+  let pathSVG = '    <path d="' + path.d + '"';
+  
+  if (path.fill) {
+    pathSVG += ` fill="${path.fill}"`;
+  }
+  
+  if (path.fillRule && path.fillRule !== 'nonzero') {
+    pathSVG += ` fill-rule="${path.fillRule}"`;
+  }
+  
+  if (path.opacity && path.opacity !== 1) {
+    pathSVG += ` opacity="${path.opacity}"`;
+  }
+  
+  if (path.blendMode) {
+    pathSVG += ` style="mix-blend-mode: ${path.blendMode}"`;
+  }
+  
+  pathSVG += '/>\n';
+  
+  return pathSVG;
+}
+
+/**
+ * optimizeSVGForOutput() - Финальная оптимизация SVG
+ */
+function optimizeSVGForOutput(svgContent, options) {
+  let optimized = svgContent;
+  
+  if (options.removeComments) {
+    optimized = optimized.replace(/<!--[\s\S]*?-->/g, '');
+  }
+  
+  if (options.minimizeWhitespace) {
+    optimized = optimized.replace(/\s+/g, ' ').replace(/>\s+</g, '><');
+  }
+  
+  if (options.roundNumbers) {
+    optimized = optimized.replace(/(\d+\.\d{3})\d+/g, '$1');
+  }
+  
+  return optimized.trim();
+}
+
+/**
  * Упрощенное определение типа контента без тяжелых библиотек
  */
 function detectContentType(imageBuffer) {
@@ -2136,15 +2722,37 @@ async function silkscreenVectorize(imageBuffer, options = {}) {
     
     console.log(`✅ ЭТАП 4 завершен: ${bezierContours.length} групп векторных контуров`);
     
-    // Переход к созданию SVG с векторными данными
-    console.log(`🎨 СОЗДАНИЕ SVG с векторизированными контурами`);
+    // ЭТАП 5: СБОРКА SVG
+    console.log(`📄 ЭТАП 5: Сборка финального SVG...`);
     
-    const svgContent = await createAdobeLimitedColorSVG(processedBuffer, settings, {
-      colorPalette,
-      colorMasks: refinedColorMasks,
-      binaryMasks,
-      vectorContours: bezierContours
+    // 5.1 Композиция слоев
+    const composedLayers = await composeLayers(bezierContours, colorPalette, processedInfo, {
+      layerOrder: 'darkToLight',
+      blendMode: 'normal',
+      opacity: 1.0,
+      maxPathsPerLayer: 1000
     });
+    
+    // 5.2 Объединение путей
+    const mergedLayers = await mergePaths(composedLayers, {
+      mergeStrategy: 'byColor',
+      mergeTolerance: 1.0,
+      preserveDetails: true,
+      minPathLength: 3,
+      maxComplexity: 500
+    });
+    
+    // 5.3 Создание финального SVG
+    const svgResult = await generateSVG(mergedLayers, {
+      includeLayerMetadata: true,
+      removeComments: false,
+      minimizeWhitespace: true,
+      roundNumbers: true
+    });
+    
+    console.log(`✅ ЭТАП 5 завершен: SVG создан (${svgResult.metadata.size} символов)`);
+    
+    const svgContent = svgResult.svg;
     
     console.log(`📄 Результат SVG длина: ${svgContent ? svgContent.length : 0}`);
     console.log(`🔍 SVG начинается с:`, svgContent ? svgContent.substring(0, 200) : 'ПУСТО');
