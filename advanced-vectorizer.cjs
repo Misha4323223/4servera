@@ -660,16 +660,20 @@ async function combineColorLayers(colorLayers, originalImageBuffer) {
     
     let svgContent = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
-  <title>Шелкография (${colorLayers.length} цветов)</title>
-  <desc>Векторизация с сохранением цветов для печати</desc>
+  <title>Adobe Limited Color (${colorLayers.length} colors)</title>
+  <desc>Generated with Adobe Illustrator Image Trace compatible algorithm</desc>
+  <style>
+    .vector-layer { shape-rendering: optimizeSpeed; }
+  </style>
 `;
     
     let totalPaths = 0;
     
-    // Жесткие ограничения для шелкографии
-    const MAX_PATHS_PER_LAYER = 50; // Максимум 50 путей на цвет
-    const MAX_TOTAL_PATHS = 200; // Максимум 200 путей на весь SVG
-    const MAX_SVG_SIZE_KB = 500; // Максимум 500KB
+    // Жесткие ограничения для шелкографии и браузерного отображения
+    const MAX_PATHS_PER_LAYER = 25; // Уменьшено до 25 путей на цвет для лучшей производительности
+    const MAX_TOTAL_PATHS = 100; // Уменьшено до 100 путей на весь SVG
+    const MAX_SVG_SIZE_KB = 200; // Уменьшено до 200KB для быстрой загрузки
+    const MAX_PATH_COMPLEXITY = 500; // Максимальная длина path элемента
     
     // Добавляем каждый цветной слой с ограничениями
     colorLayers.forEach((layer, index) => {
@@ -677,14 +681,14 @@ async function combineColorLayers(colorLayers, originalImageBuffer) {
       console.log(`🎨 ЭТАП 4.${layerNumber}: Добавляем слой для цвета ${layer.color}`);
       console.log(`   - Путей в слое: ${layer.paths.length}`);
       
-      svgContent += `  <g id="color-layer-${layerNumber}" fill="${layer.color}" stroke="none">\n`;
+      svgContent += `  <g id="color-${layerNumber}" class="vector-layer" fill="${layer.color}" stroke="none">\n`;
       
       let validPaths = 0;
       let layerPaths = 0;
       
-      // Сортируем пути по длине (приоритет более простым формам)
+      // Сортируем пути по длине (приоритет более простым формам для браузера)
       const sortedPaths = layer.paths
-        .filter(path => path && path.trim() && path.length > 10 && path.length < 1000)
+        .filter(path => path && path.trim() && path.length > 10 && path.length < MAX_PATH_COMPLEXITY)
         .sort((a, b) => a.length - b.length);
       
       for (const path of sortedPaths) {
