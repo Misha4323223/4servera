@@ -4,6 +4,7 @@
  */
 
 const fetch = require('node-fetch');
+const { StreamVectorizer } = require('../advanced-vectorizer.cjs');
 
 /**
  * Обработчик команды "нужен вектор" в потоковом чате
@@ -70,7 +71,6 @@ async function handleVectorizerCommand(message, sessionId, res, previousImage) {
     );
     
     // Создаем векторизатор с настройками для шелкографии
-    const { StreamVectorizer } = require('../advanced-vectorizer.cjs');
     const vectorizer = new StreamVectorizer(imageBuffer, {
       maxColors: 5,           // Максимум для шелкографии
       tileSize: 512,          // Оптимальный размер
