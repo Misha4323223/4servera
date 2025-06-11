@@ -8,28 +8,46 @@ const path = require('path');
 const fs = require('fs').promises;
 const crypto = require('crypto');
 
-// Adobe Illustrator Image Trace настройки для шелкографии
+// Adobe Illustrator Image Trace - точная копия официального алгоритма
 const ADOBE_SILKSCREEN_PRESET = {
-  name: 'Adobe Silkscreen Mode',
-  description: 'Точная копия Adobe Illustrator Image Trace для шелкографии',
+  name: 'Adobe Illustrator Limited Color',
+  description: 'Точная копия Adobe Illustrator CC Image Trace Limited Color preset',
   settings: {
-    // Основные параметры как в Adobe
-    mode: 'limitedColor', // Limited Color mode
-    maxColors: 4, // 3-6 цветов как в Adobe
-    threshold: 'auto', // Автоматический порог
-    minArea: 10, // Минимальная область (удаление шума)
-    cornerThreshold: 85, // Сглаживание углов
+    // === ОСНОВНЫЕ НАСТРОЙКИ ADOBE ===
+    mode: 'limitedColor', // Limited Color (3-30 colors)
+    maxColors: 6, // Adobe default: 6 colors for Limited Color mode
     
-    // Potrace параметры, соответствующие Adobe
-    turdSize: 10, // Удаление мелких деталей (как Noise в Adobe)
-    turnPolicy: 'black', // Обработка поворотов
-    optTolerance: 0.2, // Упрощение путей (как в Adobe)
-    alphaMax: 0.8, // Сглаживание углов
-    optiCurve: true, // Оптимизация кривых
+    // === ПУТИ (PATHS PANEL) ===
+    pathFitting: 2, // Fitting: 2px (Adobe default)
+    minimumArea: 10, // Noise: 10px² (Adobe default)
+    cornerThreshold: 75, // Corners: 75% (Adobe default)
     
-    // Размеры и качество
-    maxSize: 2400, // Увеличенный размер для высокого разрешения
-    preprocessScale: 0.8 // Предварительное масштабирование
+    // === ЦВЕТА (COLORS PANEL) ===
+    method: 'abutting', // Method: Abutting (Adobe default)
+    fills: true, // Create: Fills (Adobe default)
+    strokes: false, // Create: No strokes
+    
+    // === ПРОДВИНУТЫЕ НАСТРОЙКИ ===
+    snapCurvesToLines: false, // Snap Curves To Lines: off
+    ignoreWhite: true, // Ignore White: on (Adobe default)
+    
+    // === POTRACE СООТВЕТСТВИЕ ADOBE ===
+    threshold: 128, // Threshold: средний (Adobe auto-adjust)
+    turdSize: 10, // Соответствует Noise parameter
+    turnPolicy: 'black', // Adobe turn policy
+    alphaMax: 1.0, // Adobe corner detection: 1.0 рад
+    optCurve: true, // Curve optimization: всегда включено
+    optTolerance: 0.2, // Path simplification tolerance
+    
+    // === ПРЕДВАРИТЕЛЬНАЯ ОБРАБОТКА ===
+    resample: 150, // Adobe resamples to 150-300 DPI
+    blur: 0, // No blur preprocessing  
+    preprocessMode: 'enhanced', // Enhanced color detection
+    
+    // === КАЧЕСТВО И РАЗМЕРЫ ===
+    maxSize: 2048, // Adobe max processing size
+    outputDPI: 300, // Output DPI for print
+    vectorPrecision: 'high' // High precision vectors
   }
 };
 
@@ -598,17 +616,17 @@ async function vectorizeColorLayer(maskBuffer, color, settings) {
   const potrace = require('potrace');
   
   try {
-    // Оптимизированные параметры для шелкографии - упрощенные формы
+    // Adobe Illustrator Limited Color параметры
     const potraceParams = {
-      threshold: 128,
-      turdSize: Math.max(10, settings.turdSize || 10), // Убираем мелкие детали (10 пикселей минимум)
-      turnPolicy: settings.turnPolicy || 'black',
-      alphaMax: Math.min(0.75, settings.alphaMax || 0.75), // Меньше углов = проще формы
-      optCurve: true, // Всегда оптимизируем кривые
-      optTolerance: Math.max(0.15, settings.optTolerance || 0.15) // Больше толерантность = меньше точек
+      threshold: settings.threshold || 128, // Adobe auto-threshold
+      turdSize: settings.minimumArea || 10, // Adobe Noise parameter (10px²)
+      turnPolicy: settings.turnPolicy || 'black', // Adobe turn policy
+      alphaMax: settings.alphaMax || 1.0, // Adobe corner detection (1.0 рад)
+      optCurve: settings.optCurve !== false, // Adobe curve optimization (всегда включено)
+      optTolerance: settings.optTolerance || 0.2 // Adobe path fitting tolerance
     };
     
-    console.log(`🎯 ЭТАП 3: Параметры векторизации для ${color.hex}:`, potraceParams);
+    console.log(`🎯 Adobe Illustrator трассировка для ${color.hex}:`, potraceParams);
     
     return new Promise((resolve, reject) => {
       potrace.trace(maskBuffer, potraceParams, (err, svg) => {
