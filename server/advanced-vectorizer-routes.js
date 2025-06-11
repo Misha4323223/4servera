@@ -238,8 +238,15 @@ router.post('/convert-url', async (req, res) => {
       options
     });
 
-    // Вызываем функцию из advanced-vectorizer.cjs для работы с URL
-    const result = await advancedVectorizer.vectorizeFromUrl(imageUrl, options);
+    // Используем исправленный Adobe алгоритм цветовой сегментации
+    console.log('🎨 CONVERT-URL: Применяем исправленный Adobe Illustrator алгоритм');
+    const result = await advancedVectorizer.vectorizeFromUrl(imageUrl, { maxColors: 6, ...options });
+    
+    // Адаптируем результат под ожидаемый формат API
+    if (result.success) {
+      result.detectedType = 'silkscreen';
+      result.filename = `vectorized_${Date.now().toString(36)}.svg`;
+    }
 
     if (result.success) {
       res.json({
