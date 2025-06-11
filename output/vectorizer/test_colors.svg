@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="400" height="400" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <title>Color Test - Multiple Colors</title>
+  <desc>Диагностический SVG для проверки цветового отображения</desc>
+  
+  <!-- Цвет 1: Черный -->
+  <g id="color-1" fill="#000000" stroke="none">
+    <rect x="0" y="0" width="200" height="200"/>
+    <text x="10" y="30" fill="#ffffff" font-family="Arial" font-size="14">Черный #000000</text>
+  </g>
+  
+  <!-- Цвет 2: Красный -->
+  <g id="color-2" fill="#ff0000" stroke="none">
+    <rect x="200" y="0" width="200" height="200"/>
+    <text x="210" y="30" fill="#ffffff" font-family="Arial" font-size="14">Красный #ff0000</text>
+  </g>
+  
+  <!-- Цвет 3: Зеленый -->
+  <g id="color-3" fill="#00ff00" stroke="none">
+    <rect x="0" y="200" width="200" height="200"/>
+    <text x="10" y="230" fill="#000000" font-family="Arial" font-size="14">Зеленый #00ff00</text>
+  </g>
+  
+  <!-- Цвет 4: Синий -->
+  <g id="color-4" fill="#0000ff" stroke="none">
+    <rect x="200" y="200" width="200" height="200"/>
+    <text x="210" y="230" fill="#ffffff" font-family="Arial" font-size="14">Синий #0000ff</text>
+  </g>
+</svg>
