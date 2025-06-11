@@ -1,8 +1,8 @@
 [run]
-command = "npm run dev:all"
+command = "npm run dev"
 
 [workflows]
-"Start application" = "npm run dev:all"
+"Start application" = "npm run dev"
 
 [deployment]
 run = ["npm", "run", "start"]

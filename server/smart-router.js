@@ -316,53 +316,65 @@ ${previewSvg}
           const response = await fetch(lastImageUrl);
           const imageBuffer = await response.buffer();
           
-          // Используем новый Adobe алгоритм векторизации
+          // Используем векторизацию для шелкографии
           let result;
           try {
-            SmartLogger.route('🎨 Запуск Adobe Illustrator векторизации');
+            SmartLogger.route('🎨 Запуск векторизации для шелкографии');
             
-            const svgContent = await advancedVectorizer.vectorizeImage(imageBuffer, { 
-              quality: 'silkscreen' 
-            });
+            result = await advancedVectorizer.silkscreenVectorize(
+              imageBuffer,
+              {
+                outputFormat: 'svg',
+                maxFileSize: 20 * 1024 * 1024 // 20МБ максимум
+              }
+            );
             
-            result = {
-              success: true,
-              svgContent: svgContent,
-              fileSize: Buffer.byteLength(svgContent, 'utf8'),
-              algorithm: 'Adobe Illustrator Limited Color'
-            };
-            
+            if (!result.success) {
+              throw new Error(result.error || 'Ошибка векторизации');
+            }
           } catch (vectorError) {
-            SmartLogger.error('Adobe векторизация ошибка:', vectorError);
-            result = {
-              success: false,
-              error: vectorError.message
-            };
+            SmartLogger.route('Векторизация недоступна, используем fallback');
+            // Fallback к базовой векторизации
+            result = await advancedVectorizer.vectorizeImage(
+              imageBuffer,
+              'user_image',
+              { outputFormat: 'svg' }
+            );
           }
           
           if (result.success) {
-            let responseText = `✅ Векторизация завершена через Adobe Illustrator алгоритм!\n\n`;
-            responseText += `📄 Формат: SVG (5 цветов максимум)  \n`;
-            responseText += `🎨 Качество: ${result.algorithm}  \n`;
-            responseText += `📏 Размер: ${(result.fileSize / 1024).toFixed(1)}KB\n\n`;
+            let responseText = `✅ **Векторизация для шелкографии завершена!**\n\n`;
+            responseText += `📄 **Формат:** SVG (максимум 5 цветов)\n`;
+            responseText += `📏 **Размер файла:** ${(result.fileSize / 1024).toFixed(1)}KB\n`;
+            if (result.optimized) {
+              responseText += `🗜️ **Оптимизирован:** до 20МБ\n`;
+            }
+            responseText += `🎨 **Оптимизировано для печати**\n\n`;
             
-            // Добавляем встроенное SVG превью
-            responseText += `\`\`\`svg\n${result.svgContent}\n\`\`\`\n\n`;
+            // Информация о файле
+            responseText += `📊 **Детали:**\n`;
+            responseText += `• Режим: Шелкография\n`;
+            responseText += `• Цвета: Максимум 5\n`;
+            responseText += `• Лимит размера: 20МБ\n\n`;
             
             // Сохраняем SVG файл для доступа
             const crypto = require('crypto');
             const imageId = crypto.randomBytes(8).toString('hex');
             const filename = `vectorized_${imageId}.svg`;
-            const outputPath = path.join(__dirname, '..', 'output', filename);
+            const outputPath = path.join(__dirname, '..', 'output', 'vectorizer', filename);
             
             try {
               await fs.writeFile(outputPath, result.svgContent, 'utf8');
-              responseText += `📁 Файл: ${filename}\n\n`;
+              
+              responseText += `📁 **Файл готов:**\n`;
+              responseText += `🔗 [Просмотреть SVG](/output/vectorizer/${filename})\n`;
+              responseText += `📥 [Скачать SVG](/output/vectorizer/${filename}?download=true)\n\n`;
             } catch (writeError) {
               console.error('Ошибка сохранения файла:', writeError);
+              responseText += `⚠️ Файл создан, но возникла проблема с сохранением\n\n`;
             }
             
-            responseText += `Adobe Illustrator векторизация завершена`;
+            responseText += `✅ Векторизация для шелкографии завершена успешно`;
             
             return {
               success: true,

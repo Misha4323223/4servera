@@ -3,11 +3,12 @@
  * REST API endpoints для векторизации изображений
  */
 
-const express = require('express');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs').promises;
-const fetch = require('node-fetch');
+import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs/promises';
+import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,10 +28,10 @@ if (require.cache[vectorizerPath]) {
 let advancedVectorizer;
 try {
   advancedVectorizer = require('../advanced-vectorizer.cjs');
-  console.log('  ✓ Adobe Illustrator vectorizer загружен успешно');
+  console.log('  ✓ advanced-vectorizer.cjs загружен успешно');
   console.log('  ✓ Доступные методы:', Object.keys(advancedVectorizer));
 } catch (error) {
-  console.error('❌ ОШИБКА загрузки Adobe vectorizer:', error.message);
+  console.error('❌ ОШИБКА загрузки advanced-vectorizer.cjs:', error.message);
   console.error('  Stack:', error.stack);
   process.exit(1);
 }
@@ -237,23 +238,15 @@ router.post('/convert-url', async (req, res) => {
       options
     });
 
-    // Загружаем изображение по URL
-    console.log('📥 Загрузка изображения по URL...');
-    const response = await fetch(imageUrl);
-    const imageBuffer = await response.buffer();
+    // Используем исправленный Adobe алгоритм цветовой сегментации
+    console.log('🎨 CONVERT-URL: Применяем исправленный Adobe Illustrator алгоритм');
+    const result = await advancedVectorizer.vectorizeFromUrl(imageUrl, { maxColors: 6, ...options });
     
-    // Используем новый Adobe Illustrator алгоритм
-    console.log('🎨 CONVERT-URL: Adobe Illustrator векторизация');
-    const svgContent = await advancedVectorizer.vectorizeImage(imageBuffer, { quality: options.quality });
-    
-    const result = {
-      success: true,
-      svgContent: svgContent,
-      detectedType: 'adobe-silkscreen',
-      quality: 'Adobe Illustrator Limited Color',
-      filename: `vectorized_${Date.now().toString(36)}.svg`,
-      fileSize: Buffer.byteLength(svgContent, 'utf8')
-    };
+    // Адаптируем результат под ожидаемый формат API
+    if (result.success) {
+      result.detectedType = 'silkscreen';
+      result.filename = `vectorized_${Date.now().toString(36)}.svg`;
+    }
 
     if (result.success) {
       res.json({
@@ -492,4 +485,4 @@ router.get('/health', async (req, res) => {
 // Применяем обработчик ошибок векторизации ко всем маршрутам
 router.use(handleVectorizerError);
 
-module.exports = router;
+export default router;
