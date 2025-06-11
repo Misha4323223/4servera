@@ -983,15 +983,17 @@ async function createBinaryMasks(imageBuffer, threshold = 128, settings = {}) {
       console.log(`   🎯 Adobe Otsu threshold: ${finalThreshold} (исходный: ${threshold})`);
     }
     
-    // Создание бинарных масок
-    const foregroundMask = new Uint8Array(info.width * info.height);
-    const backgroundMask = new Uint8Array(info.width * info.height);
+    // Создание бинарных масок с правильными размерами
+    const totalPixels = info.width * info.height;
+    const foregroundMask = new Uint8Array(totalPixels);
+    const backgroundMask = new Uint8Array(totalPixels);
     
     let foregroundPixels = 0;
     let backgroundPixels = 0;
     
-    for (let i = 0; i < data.length; i++) {
-      const brightness = data[i];
+    // Корректная обработка grayscale данных (1 канал)
+    for (let i = 0; i < totalPixels; i++) {
+      const brightness = data[i] || 0; // Защита от undefined
       
       if (brightness >= finalThreshold) {
         foregroundMask[i] = 255; // Передний план (светлый)
@@ -1004,8 +1006,8 @@ async function createBinaryMasks(imageBuffer, threshold = 128, settings = {}) {
       }
     }
     
-    const foregroundCoverage = (foregroundPixels / data.length) * 100;
-    const backgroundCoverage = (backgroundPixels / data.length) * 100;
+    const foregroundCoverage = (foregroundPixels / totalPixels) * 100;
+    const backgroundCoverage = (backgroundPixels / totalPixels) * 100;
     
     console.log(`   ⚫ Передний план: ${foregroundPixels} пикселей (${foregroundCoverage.toFixed(1)}%)`);
     console.log(`   ⚪ Задний план: ${backgroundPixels} пикселей (${backgroundCoverage.toFixed(1)}%)`);
