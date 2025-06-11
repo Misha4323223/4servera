@@ -140,6 +140,7 @@ async function createAdobeColorMask(imageBuffer, targetColor) {
   console.log(`🎯 ADOBE MASK: Создание маски для ${targetColor.hex}`);
   
   const { data, info } = await sharp(imageBuffer)
+    .resize(800, 800, { fit: 'inside', withoutEnlargement: false }) // Увеличиваем для видимости
     .raw()
     .toBuffer({ resolveWithObject: true });
   
@@ -198,16 +199,16 @@ function calculateAdobeColorThreshold(color) {
   const brightness = (color.r * 0.299 + color.g * 0.587 + color.b * 0.114);
   const saturation = (Math.max(color.r, color.g, color.b) - Math.min(color.r, color.g, color.b)) / Math.max(color.r, color.g, color.b, 1);
   
-  // Adobe формула адаптивного порога
-  let threshold = 30; // Базовый порог
+  // Adobe формула РАСШИРЕННОГО порога для видимых областей
+  let threshold = 60; // Увеличенный базовый порог
   
-  if (brightness < 50) threshold = 45; // Темные цвета
-  else if (brightness > 200) threshold = 35; // Светлые цвета
-  else threshold = 40; // Средние тона
+  if (brightness < 50) threshold = 80; // Темные цвета - еще больше толерантности
+  else if (brightness > 200) threshold = 70; // Светлые цвета 
+  else threshold = 75; // Средние тона
   
-  // Коррекция по насыщенности
-  if (saturation > 0.7) threshold += 10; // Насыщенные цвета
-  if (saturation < 0.2) threshold += 15; // Ненасыщенные цвета
+  // Коррекция по насыщенности (более агрессивная)
+  if (saturation > 0.7) threshold += 20; // Насыщенные цвета
+  if (saturation < 0.2) threshold += 25; // Ненасыщенные цвета
   
   return threshold;
 }
@@ -243,13 +244,15 @@ async function adobeVectorizeColorMask(maskBuffer, color, originalSize) {
     
     return new Promise((resolve, reject) => {
       const params = {
-        // Adobe Illustrator параметры трассировки
-        threshold: 128,
-        optTolerance: 0.2,
-        turdSize: 2,
-        turnPolicy: potrace.Potrace.TURNPOLICY_MINORITY,
-        alphaMax: 1.0,
-        optCurve: true
+        // Adobe Illustrator параметры для ТОЛСТЫХ контуров
+        threshold: 120,
+        optTolerance: 0.4,
+        turdSize: 4,
+        turnPolicy: potrace.Potrace.TURNPOLICY_MAJORITY,
+        alphaMax: 0.8,
+        optCurve: true,
+        // Дополнительные параметры для видимости
+        blackOnWhite: true
       };
       
       potrace.trace(maskBuffer, params, (err, svg) => {
@@ -354,18 +357,45 @@ async function adobeImageTrace(imageBuffer, options = {}) {
 }
 
 /**
- * Создание финального SVG в стиле Adobe Illustrator
+ * Создание финального SVG в стиле Adobe Illustrator - ИСПРАВЛЕННАЯ ВЕРСИЯ
+ * Adobe Illustrator создает ЗАПОЛНЕННЫЕ области, не контуры
  */
 function createAdobeSVG(vectorPaths, width, height) {
+  // Увеличиваем размер для лучшей видимости (как в Adobe)
+  const targetSize = Math.max(width, height, 400);
+  const scaleX = targetSize / width;
+  const scaleY = targetSize / height;
+  
   let svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+<svg width="${targetSize}" height="${targetSize}" viewBox="0 0 ${targetSize} ${targetSize}" xmlns="http://www.w3.org/2000/svg">
   <title>Adobe Illustrator Image Trace (${vectorPaths.length} colors)</title>
-  <desc>Generated with Adobe Illustrator compatible Limited Color algorithm</desc>
+  <desc>Adobe Compatible Limited Color Vector - Filled Shapes</desc>
+  <defs>
+    <style>
+      .adobe-shape { 
+        fill-rule: evenodd; 
+        stroke: none; 
+        vector-effect: non-scaling-stroke; 
+      }
+    </style>
+  </defs>
 `;
 
-  vectorPaths.forEach((path, index) => {
-    svg += `  <g id="color-layer-${index + 1}">
-    <path d="${path.pathData}" fill="${path.color}" stroke="none" opacity="1"/>
+  // Сортируем пути по размеру области (большие внизу)
+  const sortedPaths = vectorPaths.sort((a, b) => {
+    const aSize = parseFloat(a.originalCoverage) || 0;
+    const bSize = parseFloat(b.originalCoverage) || 0;
+    return bSize - aSize; // От большего к меньшему
+  });
+
+  sortedPaths.forEach((path, index) => {
+    // Adobe стиль: заполненные фигуры с четкими границами
+    svg += `  <g id="adobe-color-${index + 1}" class="adobe-layer">
+    <path d="${path.pathData}" 
+          fill="${path.color}" 
+          class="adobe-shape"
+          transform="scale(${scaleX}, ${scaleY})"
+          opacity="1"/>
   </g>
 `;
   });
