@@ -11,6 +11,52 @@ interface Message {
   time: string;
 }
 
+// Function to render SVG content from markdown
+const renderMessageContent = (text: string) => {
+  // Check for SVG blocks
+  const svgRegex = /```svg\n([\s\S]*?)\n```/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = svgRegex.exec(text)) !== null) {
+    // Add text before SVG
+    if (match.index > lastIndex) {
+      parts.push(
+        <span key={`text-${lastIndex}`} className="whitespace-pre-wrap">
+          {text.substring(lastIndex, match.index)}
+        </span>
+      );
+    }
+
+    // Add SVG preview
+    const svgContent = match[1];
+    parts.push(
+      <div key={`svg-${match.index}`} className="my-3 p-3 bg-gray-50 rounded-lg border">
+        <div className="text-xs text-gray-600 mb-2">SVG Preview:</div>
+        <div 
+          className="svg-preview"
+          dangerouslySetInnerHTML={{ __html: svgContent }}
+          style={{ maxWidth: '350px', maxHeight: '350px', margin: '0 auto' }}
+        />
+      </div>
+    );
+
+    lastIndex = svgRegex.lastIndex;
+  }
+
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(
+      <span key={`text-${lastIndex}`} className="whitespace-pre-wrap">
+        {text.substring(lastIndex)}
+      </span>
+    );
+  }
+
+  return parts.length > 0 ? <>{parts}</> : <span className="whitespace-pre-wrap">{text}</span>;
+};
+
 const AIProvider: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -144,7 +190,7 @@ const AIProvider: React.FC = () => {
                 {message.sender === 'user' ? (
                   <div className="flex flex-col items-end space-y-1 max-w-[80%]">
                     <div className="message-bubble sent p-3 text-white text-[15px]">
-                      <p className="whitespace-pre-wrap">{message.text}</p>
+                      <p>{renderMessageContent(message.text)}</p>
                     </div>
                     <div className="flex items-center text-xs text-gray-500 pr-2 mt-1">
                       <span>{message.time}</span>
@@ -163,7 +209,7 @@ const AIProvider: React.FC = () => {
                 ) : (
                   <div className="flex flex-col space-y-1 max-w-[80%]">
                     <div className="message-bubble received p-3 text-[15px] text-gray-800">
-                      <p className="whitespace-pre-wrap">{message.text}</p>
+                      <p>{renderMessageContent(message.text)}</p>
                     </div>
                     <div className="flex items-center">
                       <span className="text-xs text-gray-500">{message.time}</span>
