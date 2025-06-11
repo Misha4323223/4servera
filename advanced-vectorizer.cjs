@@ -3442,28 +3442,35 @@ class StreamVectorizer {
   }
   
   async runSVGGeneration() {
-    this.progressTracker.startStep(4, 'Сборка финального SVG');
+    this.progressTracker.startStep(4, 'Композиция и генерация SVG');
     
-    // Генерация SVG - пока заглушка
-    const mockSVG = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="800" height="600" viewBox="0 0 800 600">
-  <metadata>
-    <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
-      <rdf:Description>
-        <dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">BOOOMERANGS Stream Vectorized</dc:title>
-        <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">BOOOMERANGS Stream Vectorizer</dc:creator>
-      </rdf:Description>
-    </rdf:RDF>
-  </metadata>
-  <g id="layer_1">
-    <path d="M 100,100 L 200,100 L 200,200 L 100,200 Z" fill="#8a1143"/>
-  </g>
-</svg>`;
+    this.svgLayers = new Map();
+    this.optimizedPaths = [];
     
-    this.progressTracker.updateStepProgress(100, `SVG: ${mockSVG.length} символов`);
+    // Этап 1: Композиция слоев
+    this.progressTracker.updateStepProgress(15, 'Инкрементальная сборка слоев');
+    
+    await this.composeLayersFromContours();
+    
+    // Этап 2: Объединение смежных путей
+    this.progressTracker.updateStepProgress(40, 'Объединение смежных областей');
+    
+    await this.mergeAdjacentPaths();
+    
+    // Этап 3: Потоковая генерация SVG
+    this.progressTracker.updateStepProgress(70, 'Потоковая запись SVG');
+    
+    const svgContent = await this.generateStreamingSVG();
+    
+    // Этап 4: Финальная оптимизация размера
+    this.progressTracker.updateStepProgress(90, 'Оптимизация размера файла');
+    
+    const optimizedSVG = await this.optimizeSVGSize(svgContent);
+    
+    this.progressTracker.updateStepProgress(100, `SVG: ${Math.round(optimizedSVG.length / 1024)}KB`);
     this.progressTracker.completeStep();
     
-    return mockSVG;
+    return optimizedSVG;
   }
   
   // Вспомогательные методы для потоковой обработки
@@ -4158,6 +4165,315 @@ class StreamVectorizer {
     const boundingArea = bounds.width * bounds.height;
     
     return boundingArea > 0 ? pathLength / Math.sqrt(boundingArea) : 0;
+  }
+  
+  // Методы для ЭТАПА 4: Композиция и генерация SVG
+  
+  async composeLayersFromContours() {
+    console.log('   🎨 Начало композиции слоев из контуров');
+    
+    // Группировка контуров по цветам для создания слоев
+    const colorLayers = new Map();
+    
+    for (const contour of this.globalContours) {
+      const color = contour.color;
+      if (!colorLayers.has(color)) {
+        colorLayers.set(color, {
+          color: color,
+          contours: [],
+          totalArea: 0,
+          bounds: { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+        });
+      }
+      
+      const layer = colorLayers.get(color);
+      layer.contours.push(contour);
+      layer.totalArea += contour.area || 0;
+      
+      // Обновление границ слоя
+      if (contour.bounds) {
+        layer.bounds.minX = Math.min(layer.bounds.minX, contour.bounds.minX);
+        layer.bounds.minY = Math.min(layer.bounds.minY, contour.bounds.minY);
+        layer.bounds.maxX = Math.max(layer.bounds.maxX, contour.bounds.maxX);
+        layer.bounds.maxY = Math.max(layer.bounds.maxY, contour.bounds.maxY);
+      }
+    }
+    
+    // Сортировка слоев по площади (большие слои снизу)
+    const sortedLayers = Array.from(colorLayers.values()).sort((a, b) => b.totalArea - a.totalArea);
+    
+    // Создание финальных слоев с z-индексом
+    sortedLayers.forEach((layer, index) => {
+      const layerId = `layer_${index}_${layer.color.substring(1)}`;
+      
+      this.svgLayers.set(layerId, {
+        ...layer,
+        zIndex: index,
+        layerId: layerId,
+        pathData: this.generateLayerPaths(layer.contours)
+      });
+    });
+    
+    console.log(`   🎨 Создано ${this.svgLayers.size} слоев`);
+  }
+  
+  generateLayerPaths(contours) {
+    const paths = [];
+    
+    for (const contour of contours) {
+      const pathData = this.contourToSVGPath(contour);
+      if (pathData) {
+        paths.push({
+          d: pathData,
+          area: contour.area,
+          complexity: contour.complexity,
+          bounds: contour.bounds
+        });
+      }
+    }
+    
+    return paths;
+  }
+  
+  contourToSVGPath(contour) {
+    const points = contour.bezierPath || contour.points;
+    if (!points || points.length < 6) return null;
+    
+    let pathData = `M ${points[0].toFixed(2)} ${points[1].toFixed(2)}`;
+    
+    // Использование кубических Безье кривых если доступны
+    if (contour.bezierPath && points.length >= 8) {
+      for (let i = 2; i < points.length - 6; i += 8) {
+        pathData += ` C ${points[i].toFixed(2)} ${points[i+1].toFixed(2)}, `;
+        pathData += `${points[i+2].toFixed(2)} ${points[i+3].toFixed(2)}, `;
+        pathData += `${points[i+4].toFixed(2)} ${points[i+5].toFixed(2)}`;
+      }
+    } else {
+      // Простые линии для обычных контуров
+      for (let i = 2; i < points.length; i += 2) {
+        pathData += ` L ${points[i].toFixed(2)} ${points[i+1].toFixed(2)}`;
+      }
+    }
+    
+    pathData += ' Z';
+    return pathData;
+  }
+  
+  async mergeAdjacentPaths() {
+    console.log('   🔗 Начало объединения смежных областей');
+    
+    let totalMerged = 0;
+    
+    for (const [layerId, layer] of this.svgLayers) {
+      const originalCount = layer.pathData.length;
+      const mergedPaths = await this.mergePathsInLayer(layer.pathData);
+      
+      layer.pathData = mergedPaths;
+      const mergedCount = originalCount - mergedPaths.length;
+      totalMerged += mergedCount;
+      
+      console.log(`     Слой ${layerId}: ${originalCount} → ${mergedPaths.length} путей (-${mergedCount})`);
+    }
+    
+    console.log(`   🔗 Объединено ${totalMerged} смежных путей`);
+  }
+  
+  async mergePathsInLayer(paths) {
+    if (paths.length <= 1) return paths;
+    
+    const merged = [];
+    const processed = new Set();
+    const adjacencyThreshold = 8.0; // Максимальное расстояние для считания путей смежными
+    
+    for (let i = 0; i < paths.length; i++) {
+      if (processed.has(i)) continue;
+      
+      let currentPath = { ...paths[i] };
+      processed.add(i);
+      
+      // Поиск смежных путей
+      let foundAdjacent = true;
+      while (foundAdjacent) {
+        foundAdjacent = false;
+        
+        for (let j = 0; j < paths.length; j++) {
+          if (processed.has(j)) continue;
+          
+          const candidate = paths[j];
+          
+          if (this.arePathsAdjacent(currentPath, candidate, adjacencyThreshold)) {
+            currentPath = this.mergePathGeometry(currentPath, candidate);
+            processed.add(j);
+            foundAdjacent = true;
+            break;
+          }
+        }
+      }
+      
+      merged.push(currentPath);
+    }
+    
+    return merged;
+  }
+  
+  arePathsAdjacent(path1, path2, threshold) {
+    const bounds1 = path1.bounds;
+    const bounds2 = path2.bounds;
+    
+    if (!bounds1 || !bounds2) return false;
+    
+    // Проверка пересечения или близости ограничивающих прямоугольников
+    const xOverlap = !(bounds1.maxX + threshold < bounds2.minX || bounds2.maxX + threshold < bounds1.minX);
+    const yOverlap = !(bounds1.maxY + threshold < bounds2.minY || bounds2.maxY + threshold < bounds1.minY);
+    
+    return xOverlap && yOverlap;
+  }
+  
+  mergePathGeometry(path1, path2) {
+    // Простое объединение путей - в реальной реализации здесь был бы более сложный алгоритм
+    return {
+      d: path1.d + ' ' + path2.d,
+      area: path1.area + path2.area,
+      complexity: Math.max(path1.complexity || 0, path2.complexity || 0),
+      bounds: this.mergeBounds(path1.bounds, path2.bounds)
+    };
+  }
+  
+  mergeBounds(bounds1, bounds2) {
+    if (!bounds1) return bounds2;
+    if (!bounds2) return bounds1;
+    
+    return {
+      minX: Math.min(bounds1.minX, bounds2.minX),
+      minY: Math.min(bounds1.minY, bounds2.minY),
+      maxX: Math.max(bounds1.maxX, bounds2.maxX),
+      maxY: Math.max(bounds1.maxY, bounds2.maxY),
+      width: Math.max(bounds1.maxX, bounds2.maxX) - Math.min(bounds1.minX, bounds2.minX),
+      height: Math.max(bounds1.maxY, bounds2.maxY) - Math.min(bounds1.minY, bounds2.minY)
+    };
+  }
+  
+  async generateStreamingSVG() {
+    console.log('   📄 Начало потоковой генерации SVG');
+    
+    const imageWidth = this.finalImageInfo.width;
+    const imageHeight = this.finalImageInfo.height;
+    
+    // SVG заголовок
+    let svg = '<?xml version="1.0" encoding="UTF-8"?>\n';
+    svg += `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" `;
+    svg += `width="${imageWidth}" height="${imageHeight}" `;
+    svg += `viewBox="0 0 ${imageWidth} ${imageHeight}">\n`;
+    
+    // Метаданные
+    svg += '  <metadata>\n';
+    svg += '    <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n';
+    svg += '      <rdf:Description>\n';
+    svg += '        <dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">BOOOMERANGS Stream Vectorized</dc:title>\n';
+    svg += '        <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">BOOOMERANGS Advanced Vectorizer</dc:creator>\n';
+    svg += `        <dc:description xmlns:dc="http://purl.org/dc/elements/1.1/">Vectorized with ${this.globalContours.length} contours in ${this.svgLayers.size} layers</dc:description>\n`;
+    svg += '      </rdf:Description>\n';
+    svg += '    </rdf:RDF>\n';
+    svg += '  </metadata>\n';
+    
+    // Генерация слоев (потоковая запись без загрузки всего в память)
+    for (const [layerId, layer] of this.svgLayers) {
+      svg += this.generateLayerSVG(layer, layerId);
+      
+      // Принудительная очистка памяти каждые 3 слоя
+      if (layer.zIndex % 3 === 0) {
+        this.memoryManager.forceCleanup();
+      }
+    }
+    
+    svg += '</svg>';
+    
+    console.log(`   📄 SVG сгенерирован: ${Math.round(svg.length / 1024)}KB`);
+    return svg;
+  }
+  
+  generateLayerSVG(layer, layerId) {
+    let layerSVG = `  <g id="${layerId}" fill="${layer.color}" fill-rule="evenodd">\n`;
+    
+    // Оптимизированная запись путей
+    for (const path of layer.pathData) {
+      layerSVG += `    <path d="${path.d}"`;
+      
+      // Добавление атрибутов оптимизации
+      if (path.area > 1000) {
+        layerSVG += ' vector-effect="non-scaling-stroke"';
+      }
+      
+      layerSVG += '/>\n';
+    }
+    
+    layerSVG += '  </g>\n';
+    return layerSVG;
+  }
+  
+  async optimizeSVGSize(svgContent) {
+    console.log('   🗜️ Начало оптимизации размера SVG');
+    
+    let optimized = svgContent;
+    const originalSize = svgContent.length;
+    
+    // Оптимизация 1: Округление координат до 2 знаков после запятой
+    optimized = optimized.replace(/(\d+\.\d{3,})/g, (match) => {
+      return parseFloat(match).toFixed(2);
+    });
+    
+    // Оптимизация 2: Удаление избыточных пробелов
+    optimized = optimized.replace(/\s+/g, ' ');
+    optimized = optimized.replace(/>\s+</g, '><');
+    
+    // Оптимизация 3: Сокращение повторяющихся команд пути
+    optimized = optimized.replace(/L\s+(\d+\.?\d*)\s+(\d+\.?\d*)\s+L\s+(\d+\.?\d*)\s+(\d+\.?\d*)/g, 
+      'L $1 $2 $3 $4');
+    
+    // Оптимизация 4: Удаление ненужных атрибутов для маленьких путей
+    optimized = optimized.replace(/vector-effect="non-scaling-stroke"\s*/g, '');
+    
+    // Оптимизация 5: Объединение одинаковых цветов
+    optimized = this.optimizeColorGroups(optimized);
+    
+    const optimizedSize = optimized.length;
+    const compressionRatio = ((originalSize - optimizedSize) / originalSize * 100).toFixed(1);
+    
+    console.log(`   🗜️ Размер оптимизирован: ${Math.round(originalSize/1024)}KB → ${Math.round(optimizedSize/1024)}KB (-${compressionRatio}%)`);
+    
+    return optimized;
+  }
+  
+  optimizeColorGroups(svgContent) {
+    // Группировка путей одного цвета для уменьшения размера
+    const colorGroups = new Map();
+    const groupRegex = /<g id="([^"]+)" fill="([^"]+)"[^>]*>([\s\S]*?)<\/g>/g;
+    
+    let match;
+    while ((match = groupRegex.exec(svgContent)) !== null) {
+      const [fullMatch, id, color, content] = match;
+      
+      if (!colorGroups.has(color)) {
+        colorGroups.set(color, []);
+      }
+      
+      colorGroups.get(color).push(content.trim());
+    }
+    
+    // Пересборка с объединенными группами
+    let optimizedContent = svgContent.replace(groupRegex, '');
+    
+    for (const [color, contents] of colorGroups) {
+      const combinedContent = contents.join('\n    ');
+      const groupId = `merged_${color.substring(1)}`;
+      
+      const insertPoint = optimizedContent.lastIndexOf('</svg>');
+      const groupSVG = `  <g id="${groupId}" fill="${color}" fill-rule="evenodd">\n    ${combinedContent}\n  </g>\n`;
+      
+      optimizedContent = optimizedContent.slice(0, insertPoint) + groupSVG + optimizedContent.slice(insertPoint);
+    }
+    
+    return optimizedContent;
   }
 }
 
