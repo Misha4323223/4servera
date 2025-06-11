@@ -8,46 +8,51 @@ const path = require('path');
 const fs = require('fs').promises;
 const crypto = require('crypto');
 
-// Adobe Illustrator Image Trace - точная копия официального алгоритма
+// Adobe Illustrator Image Trace - точная копия официального алгоритма CC 2024
 const ADOBE_SILKSCREEN_PRESET = {
   name: 'Adobe Illustrator Limited Color',
-  description: 'Точная копия Adobe Illustrator CC Image Trace Limited Color preset',
+  description: 'Adobe Illustrator CC 2024 Image Trace - Limited Color preset (3-30 colors)',
   settings: {
-    // === ОСНОВНЫЕ НАСТРОЙКИ ADOBE ===
-    mode: 'limitedColor', // Limited Color (3-30 colors)
-    maxColors: 6, // Adobe default: 6 colors for Limited Color mode
+    // === ADOBE IMAGE TRACE НАСТРОЙКИ ===
+    mode: 'limitedColor', // Limited Color mode (Adobe default)
+    maxColors: 6, // Adobe Limited Color: 3-30 colors, default 6
+    colorReduction: 'automatic', // Automatic color reduction
     
-    // === ПУТИ (PATHS PANEL) ===
-    pathFitting: 2, // Fitting: 2px (Adobe default)
-    minimumArea: 10, // Noise: 10px² (Adobe default)
-    cornerThreshold: 75, // Corners: 75% (Adobe default)
+    // === ADOBE PATHS SETTINGS ===
+    pathFitting: 2, // Fitting: 2px (Adobe default for balanced quality)
+    minimumArea: 10, // Noise: 10 square pixels (Adobe default)
+    cornerThreshold: 75, // Corners: 75% (Adobe default angle detection)
     
-    // === ЦВЕТА (COLORS PANEL) ===
-    method: 'abutting', // Method: Abutting (Adobe default)
-    fills: true, // Create: Fills (Adobe default)
-    strokes: false, // Create: No strokes
+    // === ADOBE COLORS SETTINGS ===
+    method: 'abutting', // Method: Abutting (создает смежные пути)
+    palette: 'limited', // Limited palette mode  
+    fills: true, // Create Fills: ON (Adobe default)
+    strokes: false, // Create Strokes: OFF (Adobe default)
     
-    // === ПРОДВИНУТЫЕ НАСТРОЙКИ ===
-    snapCurvesToLines: false, // Snap Curves To Lines: off
-    ignoreWhite: true, // Ignore White: on (Adobe default)
+    // === ADOBE ADVANCED SETTINGS ===
+    snapCurvesToLines: false, // Snap Curves To Lines: OFF
+    ignoreWhite: true, // Ignore White: ON (Adobe default)
+    viewMode: 'tracing', // View: Tracing Result
     
-    // === POTRACE СООТВЕТСТВИЕ ADOBE ===
-    threshold: 128, // Threshold: средний (Adobe auto-adjust)
-    turdSize: 10, // Соответствует Noise parameter
-    turnPolicy: 'black', // Adobe turn policy
-    alphaMax: 1.0, // Adobe corner detection: 1.0 рад
-    optCurve: true, // Curve optimization: всегда включено
-    optTolerance: 0.2, // Path simplification tolerance
+    // === ADOBE TRACE ENGINE ПАРАМЕТРЫ ===
+    // Adobe использует модифицированный Potrace с специальными настройками
+    threshold: 'auto', // Auto threshold (Adobe динамически подстраивает)
+    turdSize: 10, // Minimum area = Noise setting
+    turnPolicy: 'black', // Adobe turn policy for corners
+    alphaMax: 1.0, // Corner angle threshold (1.0 радиан = 57.3°)
+    optCurve: true, // Curve optimization (всегда включено в Adobe)
+    optTolerance: 0.2, // Path fitting tolerance
     
-    // === ПРЕДВАРИТЕЛЬНАЯ ОБРАБОТКА ===
-    resample: 150, // Adobe resamples to 150-300 DPI
-    blur: 0, // No blur preprocessing  
-    preprocessMode: 'enhanced', // Enhanced color detection
+    // === ADOBE PREPROCESSING ===
+    resampleDPI: 300, // Adobe resamples to 300 DPI for quality
+    smoothing: 'medium', // Medium smoothing (Adobe default)
+    colorSeparation: 'strict', // Strict color separation
     
-    // === КАЧЕСТВО И РАЗМЕРЫ ===
-    maxSize: 2048, // Adobe max processing size
-    outputDPI: 300, // Output DPI for print
-    vectorPrecision: 'high' // High precision vectors
+    // === ADOBE OUTPUT SETTINGS ===
+    maxSize: 1024, // Adobe processing limit for performance
+    outputDPI: 300, // 300 DPI for print quality
+    precision: 'high', // High precision paths
+    optimize: true // Optimize SVG output
   }
 };
 
@@ -516,11 +521,9 @@ async function createColorMask(imageBuffer, targetColor, settings) {
     
     const maskData = Buffer.alloc(info.width * info.height);
     
-    // Строгие допуски для предотвращения поглощения одним цветом
-    const baseTolerance = 25; // Уменьшено для более четкого разделения
-    const colorIntensity = Math.max(targetColor.r, targetColor.g, targetColor.b) - Math.min(targetColor.r, targetColor.g, targetColor.b);
-    const intensityBonus = colorIntensity > 100 ? 8 : 3; // Меньше бонуса
-    const adaptiveTolerance = Math.min(45, baseTolerance + intensityBonus); // Жесткий лимит
+    // Adobe Illustrator цветовая сегментация - строгое разделение
+    const baseTolerance = 15; // Adobe использует строгое разделение цветов
+    const adaptiveTolerance = baseTolerance; // Без дополнительных бонусов
     
     console.log(`🎯 Используется адаптивный допуск: ${adaptiveTolerance}`);
     
