@@ -696,23 +696,37 @@ async function combineColorLayers(colorLayers, originalImageBuffer) {
       });
     });
     
-    // Находим границы контента
-    const minX = Math.min(...allCoordinates.map(c => c.x));
-    const maxX = Math.max(...allCoordinates.map(c => c.x));
-    const minY = Math.min(...allCoordinates.map(c => c.y));
-    const maxY = Math.max(...allCoordinates.map(c => c.y));
+    // Находим границы контента только если есть координаты
+    let minX = 0, maxX = width, minY = 0, maxY = height;
+    let contentWidth = width, contentHeight = height;
     
-    const contentWidth = maxX - minX;
-    const contentHeight = maxY - minY;
+    if (allCoordinates.length > 0) {
+      minX = Math.min(...allCoordinates.map(c => c.x));
+      maxX = Math.max(...allCoordinates.map(c => c.x));
+      minY = Math.min(...allCoordinates.map(c => c.y));
+      maxY = Math.max(...allCoordinates.map(c => c.y));
+      
+      contentWidth = maxX - minX;
+      contentHeight = maxY - minY;
+    }
+    
     const padding = 20;
     
     console.log(`📊 ЭТАП 4: Границы контента - X: ${minX}-${maxX}, Y: ${minY}-${maxY}`);
     console.log(`📊 ЭТАП 4: Размер контента: ${contentWidth}x${contentHeight}`);
-    console.log(`📊 ЭТАП 4: Смещение: X=${-minX}, Y=${-minY}`);
     
-    // Обновляем размеры SVG для оптимального отображения
-    const optimizedWidth = contentWidth + padding * 2;
-    const optimizedHeight = contentHeight + padding * 2;
+    // Используем стандартные размеры 1200x1200 для совместимости
+    const optimizedWidth = 1200;
+    const optimizedHeight = 1200;
+    
+    // Вычисляем масштаб для вписывания контента в viewBox
+    const scaleX = (optimizedWidth - padding * 2) / contentWidth;
+    const scaleY = (optimizedHeight - padding * 2) / contentHeight;
+    const scale = Math.min(scaleX, scaleY, 1); // Не увеличиваем больше 100%
+    
+    // Центрируем изображение
+    const offsetX = (optimizedWidth - contentWidth * scale) / 2;
+    const offsetY = (optimizedHeight - contentHeight * scale) / 2;
     
     // Пересоздаем заголовок SVG с оптимизированными размерами
     svgContent = `<?xml version="1.0" encoding="UTF-8"?>
@@ -730,7 +744,7 @@ async function combineColorLayers(colorLayers, originalImageBuffer) {
       console.log(`🎨 ЭТАП 4.${layerNumber}: Добавляем слой для цвета ${layer.color}`);
       console.log(`   - Путей в слое: ${layer.paths.length}`);
       
-      svgContent += `  <g id="color-${layerNumber}" class="vector-layer" fill="${layer.color}" stroke="none" transform="translate(${padding - minX}, ${padding - minY})">\n`;
+      svgContent += `  <g id="color-${layerNumber}" class="vector-layer" fill="${layer.color}" stroke="none" transform="translate(${offsetX - minX * scale}, ${offsetY - minY * scale}) scale(${scale})">\n`;
       
       let validPaths = 0;
       let layerPaths = 0;
