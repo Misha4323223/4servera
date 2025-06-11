@@ -3118,8 +3118,11 @@ class MemoryManager {
   cleanup(arrayOrSet) {
     if (arrayOrSet instanceof Set) {
       arrayOrSet.clear();
-    } else if (arrayOrSet) {
+    } else if (arrayOrSet && arrayOrSet.fill) {
       arrayOrSet.fill(0);
+    } else if (arrayOrSet && typeof arrayOrSet === 'object') {
+      // Для буферов Sharp - просто помечаем как готовые к сборке мусора
+      arrayOrSet = null;
     }
   }
 }
@@ -3392,10 +3395,49 @@ class StreamVectorizer {
   }
   
   async runVectorization() {
-    this.progressTracker.startStep(3, 'Векторизация по tiles');
+    this.progressTracker.startStep(3, 'Векторизация контуров по tiles');
     
-    // Векторизация - пока заглушка
-    this.progressTracker.updateStepProgress(100, 'Контуры трассированы');
+    this.tileContours = new Map();
+    this.globalContours = [];
+    
+    const totalTiles = this.tileProcessor.tiles.length;
+    
+    // Этап 1: Извлечение контуров по каждому tile
+    this.progressTracker.updateStepProgress(10, 'Подготовка буферизованных tiles');
+    
+    for (let i = 0; i < totalTiles; i++) {
+      const tile = this.tileProcessor.tiles[i];
+      const progress = 10 + Math.round(((i + 1) / totalTiles) * 60); // 10-70%
+      
+      this.progressTracker.updateStepProgress(progress, `Контуры tile ${i + 1}/${totalTiles}`);
+      
+      // Создание буферизованного tile для правильного извлечения контуров на границах
+      const bufferedTile = await this.createBufferedTile(tile);
+      
+      // Извлечение контуров для каждого цвета в этом tile
+      const tileContours = await this.extractTileContours(bufferedTile, tile);
+      this.tileContours.set(tile.id, tileContours);
+      
+      // Очистка временных данных
+      this.memoryManager.cleanup(bufferedTile);
+      
+      // Принудительная очистка каждые 15 tiles
+      if ((i + 1) % 15 === 0) {
+        this.memoryManager.forceCleanup();
+      }
+    }
+    
+    // Этап 2: Сшивка контуров между tiles
+    this.progressTracker.updateStepProgress(75, 'Сшивка контуров между tiles');
+    
+    await this.stitchTileContours();
+    
+    // Этап 3: Оптимизация путей
+    this.progressTracker.updateStepProgress(90, 'Оптимизация векторных путей');
+    
+    await this.optimizeVectorPaths();
+    
+    this.progressTracker.updateStepProgress(100, `Готово ${this.globalContours.length} контуров`);
     this.progressTracker.completeStep();
   }
   
@@ -3587,6 +3629,535 @@ class StreamVectorizer {
       return hex.length === 1 ? '0' + hex : hex;
     };
     return '#' + toHex(r) + toHex(g) + toHex(b);
+  }
+  
+  // Методы для ЭТАПА 3: Векторизация контуров
+  
+  async createBufferedTile(tile) {
+    const sharp = require('sharp');
+    const bufferSize = this.options.overlap || 32;
+    
+    // Расширенные границы с учетом буфера
+    const bufferedX = Math.max(0, tile.x - bufferSize);
+    const bufferedY = Math.max(0, tile.y - bufferSize);
+    const bufferedWidth = Math.min(
+      tile.width + 2 * bufferSize,
+      this.finalImageInfo.width - bufferedX
+    );
+    const bufferedHeight = Math.min(
+      tile.height + 2 * bufferSize,
+      this.finalImageInfo.height - bufferedY
+    );
+    
+    const bufferedData = await sharp(this.processedBuffer)
+      .extract({
+        left: bufferedX,
+        top: bufferedY,
+        width: bufferedWidth,
+        height: bufferedHeight
+      })
+      .raw()
+      .toBuffer();
+    
+    return {
+      data: bufferedData,
+      x: bufferedX,
+      y: bufferedY,
+      width: bufferedWidth,
+      height: bufferedHeight,
+      bufferSize: bufferSize,
+      originalTile: tile
+    };
+  }
+  
+  async extractTileContours(bufferedTile, originalTile) {
+    const tileContours = {};
+    
+    // Получение масок для этого tile
+    const tileMasks = this.tileMasks.get(originalTile.id);
+    if (!tileMasks) return tileContours;
+    
+    // Извлечение контуров для каждого цвета
+    for (const [colorHex, maskInfo] of Object.entries(tileMasks)) {
+      if (maskInfo.pixelCount > 10) { // Минимальный порог
+        const contours = await this.findContoursInMask(maskInfo, bufferedTile, colorHex);
+        if (contours.length > 0) {
+          tileContours[colorHex] = contours;
+        }
+      }
+    }
+    
+    return tileContours;
+  }
+  
+  async findContoursInMask(maskInfo, bufferedTile, colorHex) {
+    const contours = [];
+    const mask = maskInfo.data;
+    const width = maskInfo.width;
+    const height = maskInfo.height;
+    
+    // Создание копии маски для модификации
+    const processedMask = this.memoryManager.allocateArray(mask.length, 'Uint8Array');
+    processedMask.set(mask);
+    
+    // Marching Squares алгоритм для извлечения контуров
+    const visited = this.memoryManager.allocateArray(width * height, 'Uint8Array');
+    
+    for (let y = 0; y < height - 1; y++) {
+      for (let x = 0; x < width - 1; x++) {
+        const idx = y * width + x;
+        
+        if (processedMask[idx] === 255 && !visited[idx]) {
+          const contour = this.traceContourMarchingSquares(
+            processedMask, visited, x, y, width, height
+          );
+          
+          if (contour.length >= 6) { // Минимум 3 точки (x,y пары)
+            // Применение оптимизации контура
+            const optimizedContour = this.optimizeContour(contour);
+            
+            contours.push({
+              points: optimizedContour,
+              color: colorHex,
+              area: this.calculateContourArea(optimizedContour),
+              bounds: this.calculateContourBounds(optimizedContour)
+            });
+          }
+        }
+      }
+    }
+    
+    this.memoryManager.cleanup(processedMask);
+    this.memoryManager.cleanup(visited);
+    
+    return contours;
+  }
+  
+  traceContourMarchingSquares(mask, visited, startX, startY, width, height) {
+    const contour = [];
+    let x = startX;
+    let y = startY;
+    let direction = 0; // 0=right, 1=down, 2=left, 3=up
+    
+    const dx = [1, 0, -1, 0];
+    const dy = [0, 1, 0, -1];
+    
+    do {
+      const idx = y * width + x;
+      visited[idx] = 1;
+      contour.push(x, y);
+      
+      // Поиск следующего пикселя по контуру
+      let found = false;
+      for (let i = 0; i < 4; i++) {
+        const newDirection = (direction + i) % 4;
+        const newX = x + dx[newDirection];
+        const newY = y + dy[newDirection];
+        
+        if (newX >= 0 && newX < width && newY >= 0 && newY < height) {
+          const newIdx = newY * width + newX;
+          if (mask[newIdx] === 255 && !visited[newIdx]) {
+            x = newX;
+            y = newY;
+            direction = newDirection;
+            found = true;
+            break;
+          }
+        }
+      }
+      
+      if (!found) break;
+      
+      // Защита от бесконечного цикла
+      if (contour.length > width * height * 2) break;
+      
+    } while (!(x === startX && y === startY) && contour.length < 10000);
+    
+    return contour;
+  }
+  
+  optimizeContour(contour) {
+    if (contour.length < 6) return contour;
+    
+    const optimized = [];
+    const tolerance = 1.5; // Douglas-Peucker tolerance
+    
+    // Применение Douglas-Peucker упрощения
+    const points = [];
+    for (let i = 0; i < contour.length; i += 2) {
+      points.push({ x: contour[i], y: contour[i + 1] });
+    }
+    
+    const simplified = this.douglasPeucker(points, tolerance);
+    
+    // Конвертация обратно в плоский массив
+    for (const point of simplified) {
+      optimized.push(point.x, point.y);
+    }
+    
+    return optimized;
+  }
+  
+  douglasPeucker(points, tolerance) {
+    if (points.length <= 2) return points;
+    
+    // Найти точку с максимальным расстоянием от линии
+    let maxDistance = 0;
+    let maxIndex = 0;
+    const start = points[0];
+    const end = points[points.length - 1];
+    
+    for (let i = 1; i < points.length - 1; i++) {
+      const distance = this.pointToLineDistance(points[i], start, end);
+      if (distance > maxDistance) {
+        maxDistance = distance;
+        maxIndex = i;
+      }
+    }
+    
+    // Если максимальное расстояние больше tolerance, рекурсивно упростить
+    if (maxDistance > tolerance) {
+      const leftPart = this.douglasPeucker(points.slice(0, maxIndex + 1), tolerance);
+      const rightPart = this.douglasPeucker(points.slice(maxIndex), tolerance);
+      
+      return leftPart.slice(0, -1).concat(rightPart);
+    } else {
+      return [start, end];
+    }
+  }
+  
+  pointToLineDistance(point, lineStart, lineEnd) {
+    const A = lineEnd.y - lineStart.y;
+    const B = lineStart.x - lineEnd.x;
+    const C = lineEnd.x * lineStart.y - lineStart.x * lineEnd.y;
+    
+    return Math.abs(A * point.x + B * point.y + C) / Math.sqrt(A * A + B * B);
+  }
+  
+  calculateContourArea(contour) {
+    let area = 0;
+    for (let i = 0; i < contour.length; i += 2) {
+      const j = (i + 2) % contour.length;
+      area += contour[i] * contour[j + 1];
+      area -= contour[j] * contour[i + 1];
+    }
+    return Math.abs(area) / 2;
+  }
+  
+  calculateContourBounds(contour) {
+    let minX = Infinity, minY = Infinity;
+    let maxX = -Infinity, maxY = -Infinity;
+    
+    for (let i = 0; i < contour.length; i += 2) {
+      const x = contour[i];
+      const y = contour[i + 1];
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+    
+    return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
+  }
+  
+  // Методы сшивки контуров между tiles
+  
+  async stitchTileContours() {
+    console.log('   🧵 Начало сшивки контуров между tiles');
+    
+    // Группировка контуров по цветам
+    const colorGroups = {};
+    
+    for (const [tileId, tileContours] of this.tileContours) {
+      for (const [colorHex, contours] of Object.entries(tileContours)) {
+        if (!colorGroups[colorHex]) {
+          colorGroups[colorHex] = [];
+        }
+        
+        for (const contour of contours) {
+          contour.tileId = tileId;
+          colorGroups[colorHex].push(contour);
+        }
+      }
+    }
+    
+    // Сшивка контуров для каждого цвета
+    for (const [colorHex, contours] of Object.entries(colorGroups)) {
+      const stitchedContours = await this.stitchContoursForColor(contours, colorHex);
+      
+      for (const contour of stitchedContours) {
+        this.globalContours.push({
+          ...contour,
+          color: colorHex
+        });
+      }
+    }
+    
+    console.log(`   🧵 Сшивка завершена: ${this.globalContours.length} глобальных контуров`);
+  }
+  
+  async stitchContoursForColor(contours, colorHex) {
+    if (contours.length === 0) return [];
+    
+    const stitched = [];
+    const processed = new Set();
+    const connectionThreshold = 5.0; // Максимальное расстояние для соединения
+    
+    for (let i = 0; i < contours.length; i++) {
+      if (processed.has(i)) continue;
+      
+      let currentContour = { ...contours[i] };
+      processed.add(i);
+      
+      // Поиск соседних контуров для соединения
+      let foundConnection = true;
+      while (foundConnection) {
+        foundConnection = false;
+        
+        for (let j = 0; j < contours.length; j++) {
+          if (processed.has(j)) continue;
+          
+          const candidate = contours[j];
+          const connection = this.findContourConnection(currentContour, candidate, connectionThreshold);
+          
+          if (connection) {
+            currentContour = this.mergeContours(currentContour, candidate, connection);
+            processed.add(j);
+            foundConnection = true;
+            break;
+          }
+        }
+      }
+      
+      // Оптимизация объединенного контура
+      currentContour.points = this.optimizeContour(currentContour.points);
+      currentContour.area = this.calculateContourArea(currentContour.points);
+      currentContour.bounds = this.calculateContourBounds(currentContour.points);
+      
+      stitched.push(currentContour);
+    }
+    
+    return stitched;
+  }
+  
+  findContourConnection(contour1, contour2, threshold) {
+    const points1 = contour1.points;
+    const points2 = contour2.points;
+    
+    // Проверка всех возможных соединений концов контуров
+    const connections = [
+      { type: 'start-start', dist: this.pointDistance(points1[0], points1[1], points2[0], points2[1]) },
+      { type: 'start-end', dist: this.pointDistance(points1[0], points1[1], points2[points2.length-2], points2[points2.length-1]) },
+      { type: 'end-start', dist: this.pointDistance(points1[points1.length-2], points1[points1.length-1], points2[0], points2[1]) },
+      { type: 'end-end', dist: this.pointDistance(points1[points1.length-2], points1[points1.length-1], points2[points2.length-2], points2[points2.length-1]) }
+    ];
+    
+    // Найти ближайшее соединение
+    const closest = connections.reduce((min, current) => 
+      current.dist < min.dist ? current : min
+    );
+    
+    return closest.dist <= threshold ? closest : null;
+  }
+  
+  mergeContours(contour1, contour2, connection) {
+    const points1 = [...contour1.points];
+    const points2 = [...contour2.points];
+    let mergedPoints = [];
+    
+    switch (connection.type) {
+      case 'start-start':
+        // Развернуть первый контур и соединить с началом второго
+        mergedPoints = points1.reverse().concat(points2);
+        break;
+        
+      case 'start-end':
+        // Соединить конец второго с началом первого
+        mergedPoints = points2.concat(points1);
+        break;
+        
+      case 'end-start':
+        // Обычное соединение: конец первого к началу второго
+        mergedPoints = points1.concat(points2);
+        break;
+        
+      case 'end-end':
+        // Соединить конец первого с развернутым вторым
+        mergedPoints = points1.concat(points2.reverse());
+        break;
+    }
+    
+    return {
+      points: mergedPoints,
+      color: contour1.color,
+      area: 0, // Будет пересчитано
+      bounds: null // Будет пересчитано
+    };
+  }
+  
+  pointDistance(x1, y1, x2, y2) {
+    return Math.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+  }
+  
+  // Методы оптимизации векторных путей
+  
+  async optimizeVectorPaths() {
+    console.log('   ⚡ Начало оптимизации векторных путей');
+    
+    const optimizedContours = [];
+    
+    for (const contour of this.globalContours) {
+      // Пропустить слишком маленькие контуры
+      if (contour.area < 25) continue;
+      
+      // Применение Безье-аппроксимации
+      const bezierPath = this.approximateWithBezier(contour.points);
+      
+      // Сглаживание острых углов
+      const smoothedPath = this.smoothSharpCorners(bezierPath);
+      
+      // Оптимизация количества точек
+      const optimizedPath = this.optimizePathPoints(smoothedPath);
+      
+      optimizedContours.push({
+        ...contour,
+        bezierPath: optimizedPath,
+        pathLength: this.calculatePathLength(optimizedPath),
+        complexity: this.calculatePathComplexity(optimizedPath)
+      });
+    }
+    
+    this.globalContours = optimizedContours;
+    
+    console.log(`   ⚡ Оптимизация завершена: ${this.globalContours.length} оптимизированных путей`);
+  }
+  
+  approximateWithBezier(points) {
+    if (points.length < 6) return points;
+    
+    const bezierPath = [];
+    const segmentSize = 8; // Точек на сегмент
+    
+    for (let i = 0; i < points.length - segmentSize; i += segmentSize) {
+      const segment = points.slice(i, i + segmentSize + 2);
+      const bezierSegment = this.fitBezierToSegment(segment);
+      bezierPath.push(...bezierSegment);
+    }
+    
+    return bezierPath;
+  }
+  
+  fitBezierToSegment(segment) {
+    if (segment.length < 6) return segment;
+    
+    // Простая Безье-аппроксимация для сегмента
+    const startX = segment[0];
+    const startY = segment[1];
+    const endX = segment[segment.length - 2];
+    const endY = segment[segment.length - 1];
+    
+    // Вычисление контрольных точек
+    const midIndex = Math.floor(segment.length / 4) * 2;
+    const cp1X = segment[midIndex];
+    const cp1Y = segment[midIndex + 1];
+    const cp2X = segment[segment.length - midIndex - 2];
+    const cp2Y = segment[segment.length - midIndex - 1];
+    
+    return [startX, startY, cp1X, cp1Y, cp2X, cp2Y, endX, endY];
+  }
+  
+  smoothSharpCorners(path) {
+    if (path.length < 12) return path;
+    
+    const smoothed = [...path];
+    const smoothingRadius = 2.0;
+    
+    // Обнаружение и сглаживание острых углов
+    for (let i = 4; i < path.length - 4; i += 2) {
+      const prevX = path[i - 2];
+      const prevY = path[i - 1];
+      const currX = path[i];
+      const currY = path[i + 1];
+      const nextX = path[i + 2];
+      const nextY = path[i + 3];
+      
+      const angle = this.calculateAngle(prevX, prevY, currX, currY, nextX, nextY);
+      
+      if (angle < Math.PI / 3) { // Острый угол < 60 градусов
+        // Применить сглаживание
+        smoothed[i] = currX + (prevX + nextX - 2 * currX) * 0.3;
+        smoothed[i + 1] = currY + (prevY + nextY - 2 * currY) * 0.3;
+      }
+    }
+    
+    return smoothed;
+  }
+  
+  calculateAngle(x1, y1, x2, y2, x3, y3) {
+    const v1x = x1 - x2;
+    const v1y = y1 - y2;
+    const v2x = x3 - x2;
+    const v2y = y3 - y2;
+    
+    const dot = v1x * v2x + v1y * v2y;
+    const mag1 = Math.sqrt(v1x * v1x + v1y * v1y);
+    const mag2 = Math.sqrt(v2x * v2x + v2y * v2y);
+    
+    if (mag1 === 0 || mag2 === 0) return Math.PI;
+    
+    const cosAngle = dot / (mag1 * mag2);
+    return Math.acos(Math.max(-1, Math.min(1, cosAngle)));
+  }
+  
+  optimizePathPoints(path) {
+    // Удаление избыточных точек при сохранении формы
+    const optimized = [];
+    const tolerance = 1.0;
+    
+    for (let i = 0; i < path.length; i += 2) {
+      if (i === 0 || i === path.length - 2) {
+        // Всегда сохранять первую и последнюю точки
+        optimized.push(path[i], path[i + 1]);
+      } else if (i < path.length - 4) {
+        const prevX = optimized[optimized.length - 2];
+        const prevY = optimized[optimized.length - 1];
+        const currX = path[i];
+        const currY = path[i + 1];
+        const nextX = path[i + 2];
+        const nextY = path[i + 3];
+        
+        const distance = this.pointToLineDistance(
+          { x: currX, y: currY },
+          { x: prevX, y: prevY },
+          { x: nextX, y: nextY }
+        );
+        
+        if (distance > tolerance) {
+          optimized.push(currX, currY);
+        }
+      }
+    }
+    
+    return optimized;
+  }
+  
+  calculatePathLength(path) {
+    let length = 0;
+    for (let i = 2; i < path.length; i += 2) {
+      const dx = path[i] - path[i - 2];
+      const dy = path[i + 1] - path[i - 1];
+      length += Math.sqrt(dx * dx + dy * dy);
+    }
+    return length;
+  }
+  
+  calculatePathComplexity(path) {
+    // Простая метрика сложности: отношение длины пути к площади ограничивающего прямоугольника
+    const bounds = this.calculateContourBounds(path);
+    const pathLength = this.calculatePathLength(path);
+    const boundingArea = bounds.width * bounds.height;
+    
+    return boundingArea > 0 ? pathLength / Math.sqrt(boundingArea) : 0;
   }
 }
 
