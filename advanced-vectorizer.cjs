@@ -849,6 +849,11 @@ async function createColorMasks(imageBuffer, colorPalette, settings = {}) {
       throw new Error('Невалидные данные для createColorMasks');
     }
     
+    // Валидация channels
+    if (!info.channels || info.channels < 3) {
+      throw new Error('Изображение должно иметь минимум 3 канала (RGB)');
+    }
+    
     const masks = [];
     const tolerance = settings.colorTolerance || 45; // Adobe стандартный tolerance
     
@@ -883,6 +888,11 @@ async function createColorMasks(imageBuffer, colorPalette, settings = {}) {
             0.59 * deltaG * deltaG +  // Green weight 
             0.11 * deltaB * deltaB    // Blue weight
           );
+          
+          // Защита от NaN/Infinity
+          if (!isFinite(colorDistance)) {
+            continue; // Пропускаем невалидные расчеты
+          }
           
           // Проверка попадания в tolerance
           if (colorDistance <= tolerance) {
@@ -1065,19 +1075,28 @@ async function refineMasks(masks, settings = {}) {
       
       // Морфологические операции (opening + closing)
       for (let iter = 0; iter < iterations; iter++) {
-        // 1. Erosion (сужение)
+        // 1. Erosion (сужение) с обработкой границ
         const erodedMask = new Uint8Array(width * height);
         
-        for (let y = 1; y < height - 1; y++) {
-          for (let x = 1; x < width - 1; x++) {
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
             const centerIndex = y * width + x;
             let minValue = 255;
             
-            // Проверяем окрестность
+            // Проверяем окрестность с безопасными границами
             for (let ky = -1; ky <= 1; ky++) {
               for (let kx = -1; kx <= 1; kx++) {
-                const neighborIndex = (y + ky) * width + (x + kx);
-                minValue = Math.min(minValue, processedMask[neighborIndex]);
+                const ny = y + ky;
+                const nx = x + kx;
+                
+                // Проверка границ
+                if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+                  const neighborIndex = ny * width + nx;
+                  minValue = Math.min(minValue, processedMask[neighborIndex]);
+                } else {
+                  // Граничные пиксели считаем как 0 (черные)
+                  minValue = Math.min(minValue, 0);
+                }
               }
             }
             
@@ -1085,19 +1104,28 @@ async function refineMasks(masks, settings = {}) {
           }
         }
         
-        // 2. Dilation (расширение)
+        // 2. Dilation (расширение) с обработкой границ
         const dilatedMask = new Uint8Array(width * height);
         
-        for (let y = 1; y < height - 1; y++) {
-          for (let x = 1; x < width - 1; x++) {
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
             const centerIndex = y * width + x;
             let maxValue = 0;
             
-            // Проверяем окрестность
+            // Проверяем окрестность с безопасными границами
             for (let ky = -1; ky <= 1; ky++) {
               for (let kx = -1; kx <= 1; kx++) {
-                const neighborIndex = (y + ky) * width + (x + kx);
-                maxValue = Math.max(maxValue, erodedMask[neighborIndex]);
+                const ny = y + ky;
+                const nx = x + kx;
+                
+                // Проверка границ
+                if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+                  const neighborIndex = ny * width + nx;
+                  maxValue = Math.max(maxValue, erodedMask[neighborIndex]);
+                } else {
+                  // Граничные пиксели считаем как 0 (черные)
+                  maxValue = Math.max(maxValue, 0);
+                }
               }
             }
             
