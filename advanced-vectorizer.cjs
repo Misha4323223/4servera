@@ -1090,7 +1090,16 @@ async function createAdobeLimitedColorSVG(imageBuffer, settings) {
     
     console.log(`📐 Размеры: ${width}x${height}`);
     
-    // ИСПРАВЛЕНИЕ: Используем улучшенную функцию extractDominantColors
+    // ADOBE ILLUSTRATOR: Используем точную копию алгоритма Adobe
+    const adobeTracer = require('./adobe-illustrator-tracer.cjs');
+    const adobeResult = await adobeTracer.adobeImageTrace(imageBuffer, { maxColors: settings.maxColors });
+    
+    if (adobeResult.success) {
+      console.log(`✅ Adobe Illustrator Trace успешно: ${adobeResult.colorsUsed} цветов`);
+      return adobeResult.svgContent;
+    }
+    
+    console.log(`⚠️ Adobe fallback: Используем резервный алгоритм`);
     const dominantColors = await extractDominantColors(imageBuffer, settings.maxColors);
     
     if (!dominantColors || dominantColors.length === 0) {
