@@ -1089,13 +1089,33 @@ function performKMeans(pixels, k) {
   // Инициализация центроидов с разнообразием цветов
   let centroids = [];
   
-  // Умная инициализация центроидов на основе реальных цветов изображения
-  for (let i = 0; i < k; i++) {
-    // Выбираем пиксели с равномерным распределением по изображению
-    const step = Math.floor(pixels.length / k);
-    const index = i * step;
-    const selectedPixel = pixels[Math.min(index, pixels.length - 1)];
-    centroids.push({ ...selectedPixel, weight: 0 });
+  // Умная инициализация центроидов - выбираем максимально разные цвета
+  centroids.push({ ...pixels[0], weight: 0 }); // Первый пиксель
+  
+  for (let i = 1; i < k; i++) {
+    let maxDistance = 0;
+    let bestPixel = pixels[0];
+    
+    // Находим пиксель, максимально отличающийся от уже выбранных центроидов
+    for (const pixel of pixels) {
+      let minDistanceToExisting = Infinity;
+      
+      for (const centroid of centroids) {
+        const distance = Math.sqrt(
+          Math.pow(pixel.r - centroid.r, 2) +
+          Math.pow(pixel.g - centroid.g, 2) +
+          Math.pow(pixel.b - centroid.b, 2)
+        );
+        minDistanceToExisting = Math.min(minDistanceToExisting, distance);
+      }
+      
+      if (minDistanceToExisting > maxDistance) {
+        maxDistance = minDistanceToExisting;
+        bestPixel = pixel;
+      }
+    }
+    
+    centroids.push({ ...bestPixel, weight: 0 });
   }
   
   console.log(`🎯 Инициализировано ${centroids.length} центроидов`);
@@ -1138,9 +1158,12 @@ function performKMeans(pixels, k) {
     });
   }
   
-  // Возвращаем все кластеры с минимальным весом для шелкографии
-  const validCentroids = centroids.filter(c => c.weight > 0.1);
+  // Возвращаем ВСЕ найденные кластеры для сохранения всех цветов
+  const validCentroids = centroids.filter(c => c.weight > 0); // Убираем только пустые кластеры
   console.log(`🎨 K-means итоговых цветов: ${validCentroids.length} из ${centroids.length}`);
+  validCentroids.forEach((centroid, i) => {
+    console.log(`   Цвет ${i + 1}: RGB(${Math.round(centroid.r)}, ${Math.round(centroid.g)}, ${Math.round(centroid.b)}) - ${centroid.weight.toFixed(2)}%`);
+  });
   return validCentroids;
 }
 
