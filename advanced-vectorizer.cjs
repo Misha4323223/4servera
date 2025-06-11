@@ -3128,6 +3128,334 @@ class MemoryManager {
 }
 
 /**
+ * AdvancedMemoryManager - Продвинутое управление памятью с мониторингом и адаптацией
+ */
+class AdvancedMemoryManager {
+  constructor(maxMemoryMB = 150) {
+    this.maxMemoryMB = maxMemoryMB;
+    this.allocatedArrays = new Set();
+    this.memoryHistory = [];
+    this.criticalThreshold = 0.9; // 90% от лимита
+    this.warningThreshold = 0.8; // 80% от лимита
+    this.adaptiveMode = false;
+    this.lastCleanupTime = Date.now();
+    this.memoryPressureEvents = 0;
+    
+    this.startRealTimeMonitoring();
+  }
+
+  allocateArray(size, type = 'Uint8Array') {
+    const sizeInMB = (size * this.getTypeSize(type)) / (1024 * 1024);
+    
+    if (!this.checkMemoryAvailability(sizeInMB)) {
+      return this.handleMemoryPressure(size, type, sizeInMB);
+    }
+
+    const array = this.createTypedArray(type, size);
+    this.allocatedArrays.add({
+      array: array,
+      size: sizeInMB,
+      type: type,
+      timestamp: Date.now(),
+      id: this.generateArrayId()
+    });
+
+    this.updateMemoryHistory();
+    return array;
+  }
+
+  checkMemoryAvailability(requiredMB) {
+    const currentUsage = this.getCurrentMemoryUsage();
+    const projectedUsage = currentUsage + requiredMB;
+    
+    if (projectedUsage > this.maxMemoryMB * this.criticalThreshold) {
+      console.log(`   🚨 Критическое потребление памяти: ${projectedUsage.toFixed(1)}MB / ${this.maxMemoryMB}MB`);
+      return false;
+    }
+    
+    if (projectedUsage > this.maxMemoryMB * this.warningThreshold) {
+      console.log(`   ⚠️ Предупреждение о памяти: ${projectedUsage.toFixed(1)}MB / ${this.maxMemoryMB}MB`);
+      this.memoryPressureEvents++;
+    }
+    
+    return true;
+  }
+
+  handleMemoryPressure(size, type, sizeInMB) {
+    console.log(`   🔄 Активация адаптивного режима из-за нехватки памяти`);
+    
+    this.performIntelligentCleanup();
+    
+    if (this.getCurrentMemoryUsage() + sizeInMB <= this.maxMemoryMB * this.criticalThreshold) {
+      console.log(`   ✅ Память освобождена, продолжаем выделение`);
+      return this.allocateArray(size, type);
+    }
+    
+    return this.activateFallbackMode(size, type);
+  }
+
+  performIntelligentCleanup() {
+    console.log(`   🧹 Интеллектуальная очистка памяти...`);
+    
+    const sizeBefore = this.getCurrentMemoryUsage();
+    const currentTime = Date.now();
+    const oldArrayThreshold = 30000; // 30 секунд
+    
+    const arrayToRemove = [];
+    for (const item of this.allocatedArrays) {
+      if (currentTime - item.timestamp > oldArrayThreshold) {
+        arrayToRemove.push(item);
+      }
+    }
+    
+    for (const item of arrayToRemove) {
+      this.cleanupArray(item);
+      this.allocatedArrays.delete(item);
+    }
+    
+    if (global.gc) {
+      global.gc();
+    }
+    
+    const sizeAfter = this.getCurrentMemoryUsage();
+    const cleaned = sizeBefore - sizeAfter;
+    
+    console.log(`   🧹 Освобождено ${cleaned.toFixed(1)}MB через интеллектуальную очистку`);
+    this.lastCleanupTime = currentTime;
+    
+    return cleaned;
+  }
+
+  activateFallbackMode(originalSize, type) {
+    console.log(`   ⚡ Активация fallback режима с упрощенными алгоритмами`);
+    
+    this.adaptiveMode = true;
+    
+    const reducedSize = Math.floor(originalSize * 0.5);
+    const sizeInMB = (reducedSize * this.getTypeSize(type)) / (1024 * 1024);
+    
+    if (this.getCurrentMemoryUsage() + sizeInMB <= this.maxMemoryMB) {
+      console.log(`   📉 Используем уменьшенный массив: ${reducedSize} элементов`);
+      
+      const array = this.createTypedArray(type, reducedSize);
+      this.allocatedArrays.add({
+        array: array,
+        size: sizeInMB,
+        type: type,
+        timestamp: Date.now(),
+        id: this.generateArrayId(),
+        fallback: true
+      });
+      
+      return array;
+    }
+    
+    throw new Error(`Критическая нехватка памяти: требуется ${sizeInMB.toFixed(1)}MB, доступно ${(this.maxMemoryMB - this.getCurrentMemoryUsage()).toFixed(1)}MB`);
+  }
+
+  startRealTimeMonitoring() {
+    this.monitoringInterval = setInterval(() => {
+      this.updateMemoryHistory();
+      this.analyzeMemoryTrends();
+    }, 5000);
+  }
+
+  updateMemoryHistory() {
+    const currentUsage = this.getCurrentMemoryUsage();
+    const timestamp = Date.now();
+    
+    this.memoryHistory.push({
+      usage: currentUsage,
+      timestamp: timestamp,
+      arrayCount: this.allocatedArrays.size,
+      pressureEvents: this.memoryPressureEvents
+    });
+    
+    if (this.memoryHistory.length > 20) {
+      this.memoryHistory.shift();
+    }
+  }
+
+  analyzeMemoryTrends() {
+    if (this.memoryHistory.length < 3) return;
+    
+    const recent = this.memoryHistory.slice(-3);
+    const trend = recent[2].usage - recent[0].usage;
+    
+    if (trend > 10) {
+      console.log(`   📈 Обнаружен быстрый рост потребления памяти: +${trend.toFixed(1)}MB`);
+      this.performPreventiveCleanup();
+    }
+    
+    const avgGrowth = recent.reduce((sum, entry, index) => {
+      if (index === 0) return sum;
+      return sum + (entry.usage - recent[index - 1].usage);
+    }, 0) / (recent.length - 1);
+    
+    if (avgGrowth > 5 && this.memoryPressureEvents > 3) {
+      console.log(`   🚨 Возможная утечка памяти обнаружена: +${avgGrowth.toFixed(1)}MB/интервал`);
+      this.handleMemoryLeak();
+    }
+  }
+
+  performPreventiveCleanup() {
+    console.log(`   🛡️ Превентивная очистка памяти...`);
+    
+    const currentTime = Date.now();
+    const moderateThreshold = 15000;
+    
+    let cleanedCount = 0;
+    const itemsToRemove = [];
+    
+    for (const item of this.allocatedArrays) {
+      if (currentTime - item.timestamp > moderateThreshold) {
+        this.cleanupArray(item);
+        itemsToRemove.push(item);
+        cleanedCount++;
+      }
+    }
+    
+    itemsToRemove.forEach(item => this.allocatedArrays.delete(item));
+    
+    if (cleanedCount > 0) {
+      console.log(`   🛡️ Превентивно очищено ${cleanedCount} массивов`);
+    }
+  }
+
+  handleMemoryLeak() {
+    console.log(`   🚨 Обработка потенциальной утечки памяти...`);
+    
+    const currentTime = Date.now();
+    const aggressiveThreshold = 10000;
+    
+    const itemsToRemove = [];
+    for (const item of this.allocatedArrays) {
+      if (currentTime - item.timestamp > aggressiveThreshold) {
+        this.cleanupArray(item);
+        itemsToRemove.push(item);
+      }
+    }
+    
+    itemsToRemove.forEach(item => this.allocatedArrays.delete(item));
+    
+    if (global.gc) {
+      global.gc();
+      global.gc();
+    }
+    
+    console.log(`   🚨 Агрессивная очистка завершена: удалено ${itemsToRemove.length} элементов`);
+    
+    this.memoryPressureEvents = 0;
+  }
+
+  getAdaptiveTileSize(originalSize, imageWidth, imageHeight) {
+    if (!this.adaptiveMode) return originalSize;
+    
+    const memoryUsage = this.getCurrentMemoryUsage();
+    const memoryRatio = memoryUsage / this.maxMemoryMB;
+    
+    if (memoryRatio > 0.8) {
+      const reductionFactor = Math.max(0.5, 1 - (memoryRatio - 0.8) * 2);
+      const adaptiveSize = Math.floor(originalSize * reductionFactor);
+      
+      console.log(`   📐 Адаптивный размер tiles: ${originalSize} → ${adaptiveSize} (фактор: ${reductionFactor.toFixed(2)})`);
+      
+      return Math.max(adaptiveSize, 128);
+    }
+    
+    return originalSize;
+  }
+
+  generateArrayId() {
+    return Math.random().toString(36).substr(2, 9);
+  }
+
+  cleanupArray(item) {
+    if (item.array && item.array.fill) {
+      item.array.fill(0);
+    }
+    delete item.array;
+  }
+
+  createTypedArray(type, size) {
+    switch (type) {
+      case 'Uint8Array': return new Uint8Array(size);
+      case 'Uint16Array': return new Uint16Array(size);
+      case 'Float32Array': return new Float32Array(size);
+      default: return new Uint8Array(size);
+    }
+  }
+
+  getTypeSize(type) {
+    switch (type) {
+      case 'Uint8Array': return 1;
+      case 'Uint16Array': return 2;
+      case 'Float32Array': return 4;
+      default: return 1;
+    }
+  }
+
+  getCurrentMemoryUsage() {
+    let totalMB = 0;
+    for (const item of this.allocatedArrays) {
+      totalMB += item.size;
+    }
+    return totalMB;
+  }
+
+  getMemoryStatistics() {
+    const current = this.getCurrentMemoryUsage();
+    const maxUsage = Math.max(...this.memoryHistory.map(h => h.usage));
+    const avgUsage = this.memoryHistory.reduce((sum, h) => sum + h.usage, 0) / this.memoryHistory.length;
+    
+    return {
+      current: current,
+      max: maxUsage || current,
+      average: avgUsage || current,
+      limit: this.maxMemoryMB,
+      utilization: (current / this.maxMemoryMB * 100).toFixed(1),
+      adaptiveMode: this.adaptiveMode,
+      pressureEvents: this.memoryPressureEvents,
+      arrayCount: this.allocatedArrays.size
+    };
+  }
+
+  forceCleanup() {
+    const sizeBefore = this.getCurrentMemoryUsage();
+    
+    for (const item of this.allocatedArrays) {
+      this.cleanupArray(item);
+    }
+    
+    this.allocatedArrays.clear();
+    
+    if (global.gc) {
+      global.gc();
+    }
+    
+    console.log(`   🧹 Принудительная очистка памяти...`);
+    console.log(`   ✅ Очищено ${sizeBefore.toFixed(1)}MB памяти`);
+  }
+  
+  cleanup(arrayOrSet) {
+    if (arrayOrSet instanceof Set) {
+      arrayOrSet.clear();
+    } else if (arrayOrSet && arrayOrSet.fill) {
+      arrayOrSet.fill(0);
+    } else if (arrayOrSet && typeof arrayOrSet === 'object') {
+      arrayOrSet = null;
+    }
+  }
+
+  destroy() {
+    if (this.monitoringInterval) {
+      clearInterval(this.monitoringInterval);
+    }
+    this.forceCleanup();
+  }
+}
+
+/**
  * ProgressTracker - Отслеживание прогресса обработки
  */
 class ProgressTracker {
@@ -3213,7 +3541,7 @@ class StreamVectorizer {
       ...options
     };
     
-    this.memoryManager = new MemoryManager(this.options.maxMemoryMB);
+    this.memoryManager = new AdvancedMemoryManager(this.options.maxMemoryMB);
     this.progressTracker = new ProgressTracker(5);
     this.globalColorPalette = null;
     this.tileProcessor = null;
@@ -3310,8 +3638,8 @@ class StreamVectorizer {
       channels: processedMetadata.channels
     };
     
-    // Пересоздание TileProcessor с финальными размерами
-    this.tileProcessor = new TileProcessor(this.finalImageInfo, this.options);
+    // Пересоздание TileProcessor с финальными размерами и адаптивным управлением памятью
+    this.tileProcessor = new TileProcessor(this.finalImageInfo, this.options, this.memoryManager);
     
     this.progressTracker.updateStepProgress(100, `Готово ${this.tileProcessor.tiles.length} tiles`);
     this.progressTracker.completeStep();
