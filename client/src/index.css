@@ -34,11 +34,13 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  background: #f8f9fa;
-  border-radius: 8px;
-  padding: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background: white;
+  border-radius: 4px;
+  padding: 6px;
   overflow: hidden;
+  max-width: 280px;
+  max-height: 180px;
+  margin: 0 auto;
 }
 
 .svg-preview svg {
@@ -46,23 +48,26 @@
   max-height: 100%;
   width: auto;
   height: auto;
-  border-radius: 4px;
-  background: white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transform: scale(0.75);
+  transform-origin: center;
 }
 
 /* Адаптивные размеры для превью */
 @media (max-width: 640px) {
   .svg-preview {
-    max-width: 300px;
-    max-height: 300px;
+    max-width: 250px;
+    max-height: 150px;
+  }
+  
+  .svg-preview svg {
+    transform: scale(0.65);
   }
 }
 
 @media (min-width: 641px) {
   .svg-preview {
-    max-width: 400px;
-    max-height: 400px;
+    max-width: 280px;
+    max-height: 180px;
   }
 }
 

@@ -115,14 +115,35 @@ async function getAIResponseWithSearch(userQuery, options = {}) {
     if (isDirectVectorizerRequest) {
       let imageUrl = null;
       
-      // Всегда ищем последнее сгенерированное изображение в сессии
+      // Ищем последнее изображение в сессии (разные типы)
       if (options.sessionId) {
         try {
-          const sessionContext = await chatMemory.getSessionContext(options.sessionId, 10);
-          const lastImageMatch = sessionContext.context.match(/https:\/\/image\.pollinations\.ai\/prompt\/[^\s\)]+/);
-          if (lastImageMatch) {
-            imageUrl = lastImageMatch[0];
-            SmartLogger.route(`🔍 Найдено последнее изображение в сессии: ${imageUrl.substring(0, 100)}...`);
+          const sessionContext = await chatMemory.getSessionContext(options.sessionId, 15);
+          
+          // Приоритет поиска изображений:
+          // 1. Последние сгенерированные изображения (pollinations.ai)
+          // 2. Загруженные пользователем изображения
+          // 3. Внешние URL изображений
+          
+          const imagePatterns = [
+            /https:\/\/image\.pollinations\.ai\/prompt\/[^\s\)]+/g,  // AI генератор
+            /https?:\/\/[^\s\)]+\.(?:jpg|jpeg|png|gif|webp|bmp)/gi,  // Прямые ссылки на изображения
+            /!\[([^\]]*)\]\(([^)]+\.(?:jpg|jpeg|png|gif|webp|bmp))\)/gi  // Markdown изображения
+          ];
+          
+          for (const pattern of imagePatterns) {
+            const matches = [...sessionContext.context.matchAll(pattern)];
+            if (matches.length > 0) {
+              // Берем последнее найденное изображение
+              const lastMatch = matches[matches.length - 1];
+              imageUrl = lastMatch[2] || lastMatch[0]; // Для markdown берем URL из группы 2
+              SmartLogger.route(`🔍 Найдено последнее изображение: ${imageUrl.substring(0, 100)}...`);
+              break;
+            }
+          }
+          
+          if (!imageUrl) {
+            SmartLogger.route(`⚠️ Изображения не найдены в истории сессии`);
           }
         } catch (error) {
           SmartLogger.error(`Ошибка поиска изображения в сессии:`, error);
